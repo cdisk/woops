@@ -4,7 +4,7 @@
 > 任何功能新增、完成、搁置、行为变更，都必须先读本文件，并在同一变更中更新对应条目的状态与说明。  
 > README 只保留快速启动。历史设计稿 `bastion_architecture_design_*.plan.md` 不必再读。
 
-**最后更新：** 2026-08-14（§9 安全修复待办；清单校对）
+**最后更新：** 2026-08-14（内部口暴露改由生产防火墙收口，不改 compose 绑环回）
 
 ---
 
@@ -34,7 +34,7 @@
 | Agent 身份 | 安装下发：`asset-id`（= `assets.id`）+ `agent-token`；重装保留 id、刷新 token；无并行 `agentId`；清库后旧 token 失效，须用安装码重装轮换 token（`asset-id` 只标识不证明所有权） |
 | Agent 配置 | 运维配 `agent.yaml` 的 `gateway`（保留 `https://`）+ 可选 `gatewayTlsSpkiSha256`；凭据不进 yaml；WS 路径代码内拼接 |
 | Gateway TLS | 生产 Agent 走 `wss://`；公有 CA 可省略 pin；自签名/动态 IP 用 SPKI SHA-256 pin（`OPS_GATEWAY_TLS_SPKI_SHA256`，control-api 与 Gateway 同值；安装命令/脚本/`agent.yaml` 同源）；非本机禁止明文 `ws://`；**禁止**忽略证书校验。自签名+算 pin：[`deploy/gen-gateway-tls.sh`](deploy/gen-gateway-tls.sh) |
-| 本地端口 | **9100** = control-api（REST，**仅内网 / 本机**）；Gateway **9200 PUBLIC**（https/wss）+ **9201 INTERNAL**（http，**仅内网 / 本机**）；Compose 下 Gateway **host 网络**直绑；Console Docker **443**。生产可用 Nginx 终止 TLS 后反代。**当前未收口**（compose 仍映射 9100/5432/4822，INTERNAL 默认听 `:9201` 全网卡，nginx `/api/` 会转发 internal）→ 待做见 §9 |
+| 本地端口 | **9100** = control-api（REST）；Gateway **9200 PUBLIC**（https/wss）+ **9201 INTERNAL**（http）；Compose 下 Gateway **host 网络**直绑；Console Docker **443**。生产可用 Nginx 终止 TLS 后反代。**公网只放 443 + 9200**（正向 portmap 另放 20000–21000）；9100/9201/5432/4822 靠服务器防火墙/安全组，**不**在 compose 里绑 `127.0.0.1`（Gateway host 网需要宿主机环回映射；**9201 绑环回会断** console→`host.docker.internal`）。Console nginx 已 404 `/api/internal`、`/api/sessions/internal`、`/api/opsctl` |
 | URL 变量 | 模板 [`.env.example`](.env.example)（中文注释）；本机复制为 `.env`（**gitignore，勿提交**），`scripts/load-env.ps1` 先加载 `.env`，再叠加 `.env.local`。**PUBLIC** / **INTERNAL** 见该文件。Compose full：Gateway host 网 → `OPS_CONTROL_INTERNAL_HTTP=http://127.0.0.1:9100`、bridge 服务经 `host.docker.internal:9201` 调 Gateway |
 | woopsctl / 部署 Token | 对外二进制名 **`woopsctl`**，内部包/API/配置契约保留 `opsctl` 命名；**资产级**一机多 Token（`ops_<tokenId>_<secret>`）；可选 `expiresAt`（空=无限期）+ 可选备注；scope 五项独立：`upload` / `download` / `exec` / `forward` / `reverse`（后两者对应临时端口映射，默认不授权）；可见资产即可管理；仅 `OPSCTL_CONFIG` JSON（`server`+`token`+`pin`，创建时展示一次）；`server` 为 Gateway **https** 基址；通道：Gateway 反代换票 + filetransfer/exec/临时 portmap WS；旧 `OPSCTL_SERVER`/`OPSCTL_TOKEN` 已移除 |
 
@@ -45,8 +45,8 @@
 | 状态 | 功能 | 说明 |
 |------|------|------|
 | `[x]` | Monorepo 骨架 | `apps/console`、`apps/control-api`、`go/{gateway,agent}`、`go/cmd/woopsctl`、`go/internal/opsctl`、`deploy/`；环境变量 `.env.example` → 本机 `.env`（不入库）+ README 编译/启动；许可证 Apache-2.0 |
-| `[x]` | PostgreSQL | Compose 起库；Java 唯一写库；**不用 H2**。默认账密 `ops`/`ops`，compose **发布宿主 `:5432`**（生产须改密并收口，见 §9） |
-| `[x]` | docker-compose 全栈 | `deploy/env.prod.example`；服务器 `/opt/ops`；profiles `full`+`desktop`；**Gateway `network_mode: host`**（9200/9201 + 端口池直绑宿主，无大段 docker-proxy）；TLS 挂 `deploy/tls`（gitignore）；`Dockerfile.control-api` 用阿里云 Maven + BuildKit `/root/.m2` 缓存。full 另映射 **control-api `:9100`**、guacd **`:4822`**（均宜只留本机，见 §9） |
+| `[x]` | PostgreSQL | Compose 起库；Java 唯一写库；**不用 H2**。默认账密 `ops`/`ops`（生产务必改）；compose 映射宿主 `:5432` 给本机工具，公网靠防火墙关掉 |
+| `[x]` | docker-compose 全栈 | `deploy/env.prod.example`；服务器 `/opt/ops`；profiles `full`+`desktop`；**Gateway `network_mode: host`**（9200/9201 + 端口池直绑宿主，无大段 docker-proxy）；TLS 挂 `deploy/tls`（gitignore）；`Dockerfile.control-api` 用阿里云 Maven + BuildKit `/root/.m2` 缓存。full 另映射 control-api `:9100`、guacd `:4822`（给 host 网 Gateway 用，公网靠防火墙） |
 | `[x]` | guacd sidecar | `deploy/docker-compose.yml` → `guacamole/guacd:1.5.5`（发布宿主 `:4822`）；Gateway `OPS_GUACD_ADDR=127.0.0.1:4822`、`OPS_GUAC_BRIDGE_HOST=host.docker.internal`；console/control-api/guacd 配 `extra_hosts: host.docker.internal:host-gateway` |
 | `[x]` | `data/ops-audit/` 卷 | 运行态 JSONL **与会话录像**的本地根目录；`OPS_AUDIT_DIR`（默认 `./data/ops-audit`；Compose `/data/ops-audit` 同时挂 control-api / gateway / guacd）；已 gitignore |
 | `[ ]` | `openapi/` 契约 | Java REST → Vue TS client |
@@ -282,18 +282,18 @@
 | `[x]` | Agent 凭据 header | 控制/会话/metrics WSS 用 Header；安装码公开短 TTL（15min，可多次使用，熵约 192 bit） |
 | `[x]` | 短时会话票据 | shell/文件/桌面/exec 约 90s；portmap 约 120s；发票前校验资产可见性 |
 | `[x]` | 资产 API 不回传桌面密码 | 仅 `hasDesktopPassword` |
-| `[x]` | 全站 TLS / 反代 | Gateway PUBLIC https/wss（Agent/woopsctl）；Console Docker HTTPS + nginx `/api/`→control-api、`/ws` `/i/` `/bin/`→Gateway **INTERNAL**（`:9201`）；浏览器会话 WS **同源改写** `rewriteWs`（避免自签 :9200 二次信任；`.env.example`「不再改写主机」注释已过时）。本地 Vite 同步：`/api`→9100，`/ws` `/i` `/bin`→`OPS_GATEWAY_INTERNAL_HTTP`。对内 control↔gateway 明文 http；Agent/woopsctl 用 pin 或公有 CA |
+| `[x]` | 全站 TLS / 反代 | Gateway PUBLIC https/wss（Agent/woopsctl）；Console Docker HTTPS + nginx `/api/`→control-api（**不**转 `/api/internal`、`/api/sessions/internal`、`/api/opsctl`，404）、`/ws` `/i/` `/bin/`→Gateway **INTERNAL**（`:9201`）；浏览器会话 WS **同源改写** `rewriteWs`（避免自签 :9200 二次信任；`.env.example`「不再改写主机」注释已过时）。本地 Vite 开发代理仍把整个 `/api` 转到 9100（本机）。对内 control↔gateway 明文 http；Agent/woopsctl 用 pin 或公有 CA |
 | `[x]` | Agent 验 Gateway | 有 pin 校 SPKI（`InsecureSkipVerify` 仅配合 pin 回调）；无 pin 走系统 CA；**禁止**关校验 |
-| `[x]` | 公网 IP 不信 XFF（控制 WSS） | 上线写入用 TCP `RemoteAddr`。注册 HTTP `AgentController` **仍读 X-Forwarded-For**（9100 暴露时可伪造；收口见下行） |
+| `[x]` | 公网 IP 不信 XFF（控制 WSS） | 上线写入用 TCP `RemoteAddr`。注册 HTTP `AgentController` **仍读 X-Forwarded-For**（仅当 9100 可从不可信网络访问时有意义；生产靠防火墙） |
 | `[x]` | 录像取用防穿越 | `normalize()` 后必须仍在 `OPS_AUDIT_DIR` 根内 |
+| `[x]` | 生产端口暴露 | 防火墙/安全组只放 **443**、**9200**（及正向 portmap 20000–21000）。compose 映射 9100/5432/4822、Gateway 听 `:9201` 是给宿主机/容器互调，**不改绑环回**（9201 绑环回会断 console）。无防火墙时这些口对公网可达，是部署问题不是代码洞 |
 | `[~]` | 录像目录权限与校验和 | 日分区 `0755`、录像叶子 `0777`（供 guacd）、cast `0640`；END 记 sha256+size。**缺**独立配额 |
 
 ### 9.2 待修复（上线门槛）
 
 | 状态 | 功能 | 说明 |
 |------|------|------|
-| `[ ]` | 内部 API 鉴权与反代隔离 | **现状：** `SecurityConfig` 对 `/api/internal/**`、`/api/sessions/internal/**`、`/api/opsctl/**` `permitAll`；JwtAuthFilter 直接跳过；Console nginx/Vite 把整个 `/api/` 转到 control-api。匿名可调 `verify-ticket`（回传 `desktopPassword`）、`port-mappings/.../open-record`（开隧道票据）、`interrupt-running`（中断全部 RUNNING）。**要做：** Java 内部口共享密钥或 mTLS / 仅环回；nginx+Vite **拒绝** `/api/internal` 与 `/api/sessions/internal`；`/api/opsctl` 只走 Gateway PUBLIC（靠部署 Token），不经 Console 暴露；验票响应不对公网回桌面密码 |
-| `[ ]` | 监听与 compose 收口 | **现状：** Gateway INTERNAL 默认 `:9201`（全网卡明文）；compose 映射 9100、5432、4822；Postgres 默认 `ops`/`ops`；`env.prod.example` 曾把 `OPS_CONTROL_PUBLIC_HTTP` 指到 `:9100`。**要做：** 9100/9201/5432/4822 绑 `127.0.0.1` 或内网安全组；生产拒用示例密钥与默认库密码；文档与 example 与此一致 |
+| `[~]` | 内部 API 鉴权与反代隔离 | **Console nginx 已 404：** `/api/internal`、`/api/sessions/internal`、`/api/opsctl`（`deploy/nginx.conf`；woopsctl 仍走 Gateway PUBLIC）。Gateway→Java 仍直连 `:9100`。**仍缺：** Java 内部口 `permitAll`（本机/内网直打 9100 仍可验票）；Vite 开发代理未排除；验票响应仍带桌面密码 |
 | `[ ]` | 凭据密文库 | `desktop_password`、TOTP secret 现明文/半明文；票据内带桌面密码。按 §3：AES-GCM + 主密钥；Gateway 按票据向 Java 取一次性凭据，不把长期密码放进可被 internal 验票读出的 JWT |
 | `[ ]` | 登录与 JWT 生命周期 | 无登录/TOTP 速率限制、无密码复杂度。JWT 12h、角色在票内、存在 `localStorage`。`SessionController` 发票不走 `AccessService.requireUser`，禁用用户后仍可能开壳。**要做：** 爆破防护；密码策略；每次受保护请求（含发票）查库校验启用/角色；生产拒绝未改的 bootstrap 密码 |
 | `[ ]` | GitLab 回调不把 token 放 query | 现状 `/login?token=` 进历史、Referer、反代日志。改为一次性 code、fragment 或 HttpOnly cookie |
