@@ -1,0 +1,13 @@
+{
+  "sessionId": "22222222-2222-2222-2222-222222222222",
+  "protocol": "filetransfer",
+  "ticket": "t-xfer",
+  "params": {
+    "transferId": "33333333-3333-3333-3333-333333333333",
+    "direction": "upload",
+    "path": "/tmp/a.bin",
+    "size": 1024,
+    "fingerprint": "fp",
+    "abort": false
+  }
+}

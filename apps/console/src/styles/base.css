@@ -1,0 +1,109 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--ops-font);
+  color: var(--ops-text);
+  background: var(--ops-bg-page);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+code,
+.mono,
+.ops-mono {
+  font-family: var(--ops-font-mono);
+}
+
+::selection {
+  background: var(--ops-color-primary-soft);
+  color: var(--ops-text);
+}
+
+/* Thin scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--ops-border-strong) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--ops-border-strong);
+  border-radius: 4px;
+}
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+}
+
+.page-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.page-head h2,
+.page-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  color: var(--ops-text);
+}
+
+.page-head h3,
+.page-subtitle {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ops-text);
+}
+
+.panel {
+  background: var(--ops-bg-surface);
+  border: 1px solid var(--ops-border);
+  border-radius: var(--ops-radius);
+  padding: 16px;
+}
+
+.muted,
+.hint {
+  color: var(--ops-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}

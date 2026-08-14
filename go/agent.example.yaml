@@ -1,0 +1,23 @@
+# 运维配置：gateway（保留 https://）+ 可选 pin；凭据不进本文件
+# 同目录另需：asset-id、agent-token（安装/注册下发）
+gateway: https://127.0.0.1:9200
+gatewayTlsSpkiSha256: REPLACE_WITH_OPS_GATEWAY_TLS_SPKI_SHA256
+
+# 可选：独立 metrics WSS（默认开启）
+# metrics:
+#   enabled: true
+#   intervalSec: 60
+
+# 可选：Agent 访问 Gateway 时经上游 HTTP 代理
+# gatewayProxy: http://user:pass@10.0.0.1:3128
+
+# 可选：本机入站正向代理插件（软失败，不影响控制面）
+# proxy:
+#   enabled: false
+#   listen: "0.0.0.0:3128"
+#   username: "proxyuser"
+#   password: "changeme"
+#   allowCIDRs:
+#     - "10.0.0.0/8"
+#     - "192.168.0.0/16"
+#   allowGlobal: false

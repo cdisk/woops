@@ -1,0 +1,109 @@
+# 根目录 `.env`：PUBLIC URL 与密钥（从 .env.example 复制，勿提交）。INTERNAL 由下方 environment 覆盖为 host 语义。
+# 服务器示例：/opt/ops/.env 可参考 deploy/env.prod.example；在 /opt/ops/deploy 下执行 compose。
+# Gateway 使用 network_mode: host（9200/9201 + 端口池直绑宿主，无 docker-proxy）。
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ops
+      POSTGRES_USER: ops
+      POSTGRES_PASSWORD: ops
+    # 本机 control-api / 工具直连；full profile 容器内仍用服务名 postgres:5432
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ops -d ops"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  control-api:
+    profiles: ["full"]
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.control-api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - ../.env
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/ops
+      SPRING_DATASOURCE_USERNAME: ops
+      SPRING_DATASOURCE_PASSWORD: ops
+      # Gateway is on host network — reach via host-gateway (not container loopback).
+      OPS_GATEWAY_INTERNAL_HTTP: http://host.docker.internal:9201
+      # Gateway JSONL spool + recordings; control-api tails it into server_operation_records.
+      OPS_AUDIT_DIR: /data/ops-audit
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "9100:9100"
+    volumes:
+      - ../data/ops-audit:/data/ops-audit
+    restart: unless-stopped
+
+  gateway:
+    profiles: ["full"]
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.gateway
+    depends_on:
+      - control-api
+    network_mode: host
+    env_file:
+      - ../.env
+    environment:
+      # Host net: no Docker DNS; control-api/guacd publish to host.
+      OPS_CONTROL_INTERNAL_HTTP: http://127.0.0.1:9100
+      OPS_GUACD_ADDR: 127.0.0.1:4822
+      # guacd (bridge) dials back via host-gateway alias.
+      OPS_GUAC_BRIDGE_HOST: host.docker.internal
+      OPS_GATEWAY_TLS_CERT: /tls/gateway.crt
+      OPS_GATEWAY_TLS_KEY: /tls/gateway.key
+      OPS_AGENT_BIN_DIR: /app/bin
+      OPS_AUDIT_DIR: /data/ops-audit
+    # No ports: — host network binds :9200/:9201 and portmap pool directly.
+    volumes:
+      - ./tls:/tls:ro
+      - ../data/ops-audit:/data/ops-audit
+    restart: unless-stopped
+
+  console:
+    profiles: ["full"]
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.console
+    depends_on:
+      - control-api
+      - gateway
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "443:443"    # HTTPS console (default https port)
+    volumes:
+      - ./tls:/tls:ro
+    restart: unless-stopped
+
+  guacd:
+    profiles: ["desktop"]
+    image: guacamole/guacd:1.5.5
+    environment:
+      HOME: /home/guacd
+      GUACD_LOG_LEVEL: info
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "4822:4822"  # host-network gateway dials 127.0.0.1:4822
+    volumes:
+      - guacd_home:/home/guacd
+      # Same spool root so guacd can write RDP/VNC recordings next to the events.
+      - ../data/ops-audit:/data/ops-audit
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  guacd_home:

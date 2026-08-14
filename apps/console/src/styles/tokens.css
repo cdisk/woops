@@ -1,0 +1,23 @@
+:root {
+  --ops-color-primary: #2f5d9f;
+  --ops-color-primary-hover: #254a80;
+  --ops-color-primary-soft: #e8eef6;
+  --ops-bg-page: #f4f6f8;
+  --ops-bg-surface: #ffffff;
+  --ops-bg-aside: #eef2f6;
+  --ops-border: #d7dee7;
+  --ops-border-strong: #c5ced9;
+  --ops-text: #1b2430;
+  --ops-text-secondary: #5b6b7c;
+  --ops-text-muted: #7a8a9a;
+  --ops-success: #1f7a4d;
+  --ops-danger: #b42318;
+  --ops-warning: #b54708;
+  --ops-radius: 6px;
+  --ops-radius-sm: 4px;
+  --ops-shadow-sm: 0 1px 2px rgba(27, 36, 48, 0.06);
+  --ops-font: 'IBM Plex Sans', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --ops-font-mono: 'IBM Plex Mono', 'Cascadia Code', 'Consolas', monospace;
+  --ops-aside-width: 220px;
+  --ops-header-height: 52px;
+}

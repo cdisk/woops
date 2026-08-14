@@ -1,0 +1,51 @@
+server:
+  port: 9100
+  address: 0.0.0.0
+
+spring:
+  application:
+    name: ops-control-api
+  datasource:
+    url: jdbc:postgresql://127.0.0.1:5432/ops
+    username: ops
+    password: ops
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+
+ops:
+  # 来自根目录 `.env` / 进程环境。URL 默认值须转义冒号 (\:)，否则 Spring 会在第一个 ":" 截断。
+  control-public-http: ${OPS_CONTROL_PUBLIC_HTTP:http\://127.0.0.1\:9100}
+  gateway-public-http: ${OPS_GATEWAY_PUBLIC_HTTP:http\://127.0.0.1\:9200}
+  gateway-public-ws: ${OPS_GATEWAY_PUBLIC_WS:ws\://127.0.0.1\:9200}
+  gateway-internal-http: ${OPS_GATEWAY_INTERNAL_HTTP:http\://127.0.0.1\:9201}
+  console-public-http: ${OPS_CONSOLE_PUBLIC_HTTP:http\://127.0.0.1\:5173}
+  jwt-secret: ${OPS_JWT_SECRET:ops-dev-jwt-secret-change-me-please-32bytes}
+  ticket-secret: ${OPS_TICKET_SECRET:ops-dev-ticket-secret-change-me-32b}
+  bootstrap-admin-username: ${OPS_BOOTSTRAP_ADMIN_USERNAME:admin}
+  bootstrap-admin-password: ${OPS_BOOTSTRAP_ADMIN_PASSWORD:admin123}
+  install-code-ttl-minutes: 15
+  # Optional: Gateway cert SPKI pin (hex). Same value on Gateway. See deploy/gen-gateway-tls.sh
+  gateway-tls-spki-sha256: ${OPS_GATEWAY_TLS_SPKI_SHA256:}
+  # 运行态操作记录（server_operation_records）：Gateway JSONL 落盘目录 / 扫描间隔 / 保留天数
+  audit-dir: ${OPS_AUDIT_DIR:./data/ops-audit}
+  audit-scan-seconds: ${OPS_AUDIT_SCAN_SECONDS:5}
+  audit-retention-days: ${OPS_AUDIT_RETENTION_DAYS:90}
+  audit-stale-running-hours: ${OPS_AUDIT_STALE_RUNNING_HOURS:24}
+  # When base-url + client-id + client-secret are set, GitLab OAuth is on and local login is off.
+  #   OPS_GITLAB_BASE_URL=https://gitlab.example.com
+  #   OPS_GITLAB_CLIENT_ID=...
+  #   OPS_GITLAB_CLIENT_SECRET=...
+  #   OPS_GITLAB_REDIRECT_URI=https://ops.example.com/api/auth/gitlab/callback  (optional)
+  #   OPS_GITLAB_ADMIN_USER=alice,bob
+  gitlab:
+    base-url: ${OPS_GITLAB_BASE_URL:}
+    client-id: ${OPS_GITLAB_CLIENT_ID:}
+    client-secret: ${OPS_GITLAB_CLIENT_SECRET:}
+    redirect-uri: ${OPS_GITLAB_REDIRECT_URI:}
+    admin-user: ${OPS_GITLAB_ADMIN_USER:}

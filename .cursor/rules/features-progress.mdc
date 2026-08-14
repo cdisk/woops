@@ -1,0 +1,15 @@
+---
+description: 功能与架构约定只认 FEATURES.md；改功能必须先读后更新
+alwaysApply: true
+---
+
+# FEATURES.md 唯一契约
+
+仓库根目录 [`FEATURES.md`](../../FEATURES.md) 是**功能、进度、架构约定、分期**的唯一来源。
+
+## 必须遵守
+
+1. 做功能 / 重构 / 取舍前：只读 `FEATURES.md`。
+2. 做完或改行为后：同一变更里更新 `FEATURES.md`（含「最后更新」日期）。
+3. 不要另开进度文档，也不要依赖计划文件或聊天记录当真相源。
+4. `bastion_architecture_design_*.plan.md` 仅作历史备份，**不必读、不必同步**；有用内容已并入 `FEATURES.md`。

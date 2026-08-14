@@ -1,0 +1,40 @@
+FROM golang:1.26-alpine AS build
+WORKDIR /src
+RUN apk add --no-cache git gzip
+ENV GOPROXY=https://goproxy.cn,direct
+COPY go/go.mod go/go.sum ./
+RUN go mod download
+COPY go/ ./
+# Agent version: yymmddHHMM (local build time), same as go/scripts/build-agent-*.{sh,ps1}
+# Cross-compile Linux + Windows amd64 agents (install downloads) and woopsctl (CI / Console).
+ARG OPS_AGENT_VERSION=
+RUN VERSION="${OPS_AGENT_VERSION:-$(date +%y%m%d%H%M)}" \
+ && echo "Building woops-agent version=$VERSION" \
+ && CGO_ENABLED=0 GOOS=linux go build -o /out/gateway ./cmd/gateway \
+ && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+      -ldflags="-s -w -X main.Version=${VERSION}" -trimpath \
+      -o /out/woops-agent-linux-amd64 ./cmd/agent \
+ && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build \
+      -ldflags="-s -w -X main.Version=${VERSION}" -trimpath \
+      -o /out/woops-agent-windows-amd64.exe ./cmd/agent \
+ && gzip -9 -k /out/woops-agent-linux-amd64 /out/woops-agent-windows-amd64.exe \
+ && echo "Building woopsctl" \
+ && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" \
+      -o /out/woopsctl-linux-amd64 ./cmd/woopsctl \
+ && CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags="-s -w" \
+      -o /out/woopsctl-windows-amd64.exe ./cmd/woopsctl
+
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates
+WORKDIR /app
+COPY --from=build /out/gateway /app/gateway
+COPY --from=build /out/woops-agent-linux-amd64 /out/woops-agent-linux-amd64.gz \
+                  /out/woops-agent-windows-amd64.exe /out/woops-agent-windows-amd64.exe.gz \
+                  /out/woopsctl-linux-amd64 /out/woopsctl-windows-amd64.exe \
+                  /app/bin/
+# WinPTY for Windows Server 2016 / pre-ConPTY (install.ps1 downloads when build < 17763)
+COPY go/third_party/winpty/x64/winpty.dll go/third_party/winpty/x64/winpty-agent.exe \
+     /app/bin/winpty/amd64/
+ENV OPS_AGENT_BIN_DIR=/app/bin
+EXPOSE 9200 9201
+ENTRYPOINT ["/app/gateway"]

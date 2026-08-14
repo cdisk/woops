@@ -1,0 +1,2 @@
+﻿go/internal/gateway/modules/agentinstall/*.sh text eol=lf
+go/scripts/*.sh text eol=lf

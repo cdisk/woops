@@ -1,0 +1,6 @@
+{
+  "sessionId": "44444444-4444-4444-4444-444444444444",
+  "protocol": "rdp",
+  "ticket": "t-rdp",
+  "params": { "targetHost": "127.0.0.1", "targetPort": 3389 }
+}

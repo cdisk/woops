@@ -1,0 +1,36 @@
+{
+  "name": "woops-console",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@codemirror/commands": "^6.10.4",
+    "@codemirror/language": "^6.12.4",
+    "@codemirror/legacy-modes": "^6.5.3",
+    "@codemirror/state": "^6.7.1",
+    "@codemirror/view": "^6.43.7",
+    "@fontsource/ibm-plex-mono": "^5.3.0",
+    "@fontsource/ibm-plex-sans": "^5.3.0",
+    "@tabler/icons-vue": "^3.46.0",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
+    "asciinema-player": "^3.17.0",
+    "axios": "^1.7.7",
+    "codemirror": "^6.0.2",
+    "echarts": "^5.5.1",
+    "element-plus": "^2.8.4",
+    "guacamole-common-js": "^1.5.0",
+    "vue": "^3.5.11",
+    "vue-i18n": "^9.14.4",
+    "vue-router": "^4.4.5"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.1.4",
+    "vite": "^5.4.8"
+  }
+}
