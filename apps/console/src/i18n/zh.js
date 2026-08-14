@@ -80,6 +80,7 @@ export default {
     hintLocalDefault: '默认本地管理员可登录；配置 OPS_GITLAB_* 后将改为 GitLab 登录。本地账密登录需 TOTP 二次验证。',
     failed: '登录失败',
     gitlabFailed: 'GitLab 登录失败',
+    tooManyAttempts: '尝试次数过多，请 15 分钟后再试。',
     totpSetupHint: '请用身份验证器扫描二维码（或手动输入密钥），再输入 6 位验证码完成绑定。',
     totpVerifyHint: '请输入身份验证器中的 6 位验证码。',
     totpSecret: '密钥',

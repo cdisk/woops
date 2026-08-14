@@ -33,11 +33,19 @@ public class GitLabOAuthService {
     private final ObjectMapper mapper;
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(15)).build();
 
-    public GitLabOAuthService(OpsProperties props, AuthService authService, UserRepository users, ObjectMapper mapper) {
+    private final GitlabLoginCodeStore loginCodes;
+
+    public GitLabOAuthService(
+            OpsProperties props,
+            AuthService authService,
+            UserRepository users,
+            ObjectMapper mapper,
+            GitlabLoginCodeStore loginCodes) {
         this.props = props;
         this.authService = authService;
         this.users = users;
         this.mapper = mapper;
+        this.loginCodes = loginCodes;
     }
 
     public void requireEnabled() {
@@ -83,7 +91,7 @@ public class GitLabOAuthService {
     }
 
     @Transactional
-    public Map<String, Object> handleCallback(String code, String state) {
+    public String handleCallback(String code, String state) {
         requireEnabled();
         verifyState(state);
         if (code == null || code.isBlank()) {
@@ -95,11 +103,16 @@ public class GitLabOAuthService {
         if (!user.isEnabled()) {
             throw new ForbiddenException("user disabled");
         }
-        return authService.tokenResponse(user);
+        return loginCodes.put(authService.tokenResponse(user));
     }
 
-    public String consoleRedirectWithToken(String accessToken) {
-        return props.consoleBase() + "/login?token=" + URLEncoder.encode(accessToken, StandardCharsets.UTF_8);
+    public Map<String, Object> exchangeLoginCode(String code) {
+        requireEnabled();
+        return loginCodes.take(code);
+    }
+
+    public String consoleRedirectWithCode(String loginCode) {
+        return props.consoleBase() + "/login?code=" + URLEncoder.encode(loginCode, StandardCharsets.UTF_8);
     }
 
     private String exchangeCode(String code) {

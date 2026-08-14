@@ -1,5 +1,7 @@
 package com.ops.control.session;
 
+import com.ops.control.access.AccessService;
+import com.ops.control.user.UserEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
@@ -10,9 +12,11 @@ import java.util.UUID;
 @RequestMapping("/api/sessions")
 public class SessionController {
     private final SessionTicketService tickets;
+    private final AccessService access;
 
-    public SessionController(SessionTicketService tickets) {
+    public SessionController(SessionTicketService tickets, AccessService access) {
         this.tickets = tickets;
+        this.access = access;
     }
 
     public record TicketRequest(
@@ -27,11 +31,10 @@ public class SessionController {
 
     @PostMapping("/ticket")
     public Map<String, Object> ticket(@RequestBody TicketRequest req, Authentication auth) {
-        var claims = (io.jsonwebtoken.Claims) auth.getDetails();
-        String username = claims.get("username", String.class);
+        UserEntity user = access.requireUser(auth);
         return tickets.createTicket(
-                UUID.fromString(auth.getName()),
-                username,
+                user.getId(),
+                user.getUsername(),
                 req.assetId(),
                 req.protocol(),
                 req.direction(),

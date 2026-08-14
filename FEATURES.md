@@ -4,7 +4,7 @@
 > 任何功能新增、完成、搁置、行为变更，都必须先读本文件，并在同一变更中更新对应条目的状态与说明。  
 > README 只保留快速启动。历史设计稿 `bastion_architecture_design_*.plan.md` 不必再读。
 
-**最后更新：** 2026-08-14（内部口暴露改由生产防火墙收口，不改 compose 绑环回）
+**最后更新：** 2026-08-14（登录限速、禁用即失效 JWT、GitLab 一次性 code）
 
 ---
 
@@ -68,12 +68,12 @@
 
 | 状态 | 功能 | 说明 |
 |------|------|------|
-| `[x]` | 本地 break-glass 管理员 | JWT（**12h**，存在 Console `localStorage`；角色写在票内）；默认 `admin`/`admin123` → `SUPER_ADMIN`（生产必须改，见 §9）；配置齐 GitLab 后关闭本地登录；**本地账密强制 TOTP**（未绑定则登录后扫码绑定，已绑定则输 6 位码；`POST /auth/login` → `login/totp` 或 `login/totp-setup`；pending JWT 不可当会话用） |
+| `[x]` | 本地 break-glass 管理员 | JWT（**12h**，存在 Console `localStorage`）；默认 `admin`/`admin123` → `SUPER_ADMIN`（生产必须改，见 §9）；配置齐 GitLab 后关闭本地登录；**本地账密强制 TOTP**（未绑定则登录后扫码绑定，已绑定则输 6 位码；`POST /auth/login` → `login/totp` 或 `login/totp-setup`；pending JWT 不可当会话用）。**每次受保护请求查库**：禁用/软删立即 401；角色以库为准。登录/TOTP/GitLab 兑换 **10 次失败锁 15 分钟**（内存，按 IP+身份） |
 | `[x]` | 本地登录 TOTP（2FA） | RFC 6238（`dev.samstevens.totp`）；用户表 `totp_secret`/`totp_enabled`/`totp_last_step`（secret **现明文存库**，待加密见 §9）；登录页二维码+密钥；校验允许 ±1×30s 时钟偏差，**同一步长验证码不可重放**；管理员可 `POST /api/users/{id}/totp/reset` 清 2FA（下次登录重绑）；控制审计 `TOTP_ENABLE`/`TOTP_RESET` |
-| `[x]` | GitLab OAuth2 | `OPS_GITLAB_BASE_URL` + `CLIENT_ID` + `CLIENT_SECRET` 齐则启用并关本地登录；`OPS_GITLAB_ADMIN_USER`（逗号分隔 GitLab 用户名）登录时升为 `SUPER_ADMIN`，其余首登 `MEMBER`+空 scope；推荐 `OPS_GITLAB_REDIRECT_URI=https://<console>/api/auth/gitlab/callback`（经 Nginx `/api`）；scope 仅 `read_user`；回调后跳转 `OPS_CONSOLE_PUBLIC_HTTP/login?token=`（**token 在 query，会进历史/Referer**，待改见 §9）；GitLab `name` → 用户 `nickname` |
+| `[x]` | GitLab OAuth2 | `OPS_GITLAB_BASE_URL` + `CLIENT_ID` + `CLIENT_SECRET` 齐则启用并关本地登录；`OPS_GITLAB_ADMIN_USER`（逗号分隔 GitLab 用户名）登录时升为 `SUPER_ADMIN`，其余首登 `MEMBER`+空 scope；推荐 `OPS_GITLAB_REDIRECT_URI=https://<console>/api/auth/gitlab/callback`（经 Nginx `/api`）；scope 仅 `read_user`；回调把 access JWT 存内存 **60s 一次性 code**，跳转 `/login?code=`，登录页 `POST /api/auth/gitlab/exchange` 兑换（不再把 JWT 放 query）；GitLab `name` → 用户 `nickname` |
 | `[x]` | 系统设置 · GitLab 安装信息 | `GET /api/settings/gitlab/install-info`（超管）；含 Redirect URI |
 | `[ ]` | GitLab Group → Role 映射 | CRUD 映射表；登录合并角色（后置） |
-| `[x]` | User / Role + 数据权限 | 三角色 `SUPER_ADMIN`/`ADMIN`/`MEMBER`；表 `user_scopes`（`GROUP`/`ASSET`）；勾组=子树可管（受角色约束），勾资产=仅用不可删；展示祖先组动态计算；自写 `AccessService`；列表与按 id 读写/票据均强制校验防 IDOR（**Session 发票未走 `requireUser`**：禁用后 12h JWT 仍可能开壳，见 §9） |
+| `[x]` | User / Role + 数据权限 | 三角色 `SUPER_ADMIN`/`ADMIN`/`MEMBER`；表 `user_scopes`（`GROUP`/`ASSET`）；勾组=子树可管（受角色约束），勾资产=仅用不可删；展示祖先组动态计算；自写 `AccessService`；列表与按 id 读写/票据均强制校验防 IDOR；`JwtAuthFilter` + `SessionController` 发票走 `requireUser`（禁用后不能再开壳） |
 | `[~]` | 短时网关票据策略 | Java 已发 shell/filemanager/filetransfer/rdp/vnc/**exec** 票据（约 90s；`exec` 供控制台一键更新与 woopsctl）；按协议 `ProtocolTicketIssuer` 分发（`ProtocolRegistry`）；portmap 另 `PortmapTicketIssuer`（120s 原始 JWT）；目标 30–60s 后续统一；发票前校验资产可见性 |
 | `[x]` | 多用户管理 UI | `/users`：顶栏本地搜索（用户名/昵称/角色/来源）；建用户（用户名/昵称/密码）、启用/禁用、软删、超管改角色、设可见范围（混合树：组+资产）；管理员仅管 MEMBER；顶栏优先显示昵称；软删释放用户名，GitLab 再登会新建且启用；禁用后 GitLab 再登仍拒绝；本地用户列 **2FA** 状态，管理员可重置 TOTP |
 | `[x]` | 审计拆表 | **控制面** `control_audit_events`；**对服** `server_operation_records`（Gateway JSONL → Java 偏移 ingest；Shell/文件/EXEC/桌面录像/portmap）；**资产事件** `asset_events`（系统观测：上下线等，非人为）；`GET /api/server-operations`(+recording)、`GET /api/control-audit`、`GET /api/asset-events` 均支持 `page`/`pageSize` → `{items,total,…}`。`status` 含 `PURGED`。旧表 `audit_events`/`port_mapping_connections` 已退役。**全员强制录制**。控制审计类别含 `MONITOR`（首页预警忽略/取消忽略） |
@@ -287,6 +287,8 @@
 | `[x]` | 公网 IP 不信 XFF（控制 WSS） | 上线写入用 TCP `RemoteAddr`。注册 HTTP `AgentController` **仍读 X-Forwarded-For**（仅当 9100 可从不可信网络访问时有意义；生产靠防火墙） |
 | `[x]` | 录像取用防穿越 | `normalize()` 后必须仍在 `OPS_AUDIT_DIR` 根内 |
 | `[x]` | 生产端口暴露 | 防火墙/安全组只放 **443**、**9200**（及正向 portmap 20000–21000）。compose 映射 9100/5432/4822、Gateway 听 `:9201` 是给宿主机/容器互调，**不改绑环回**（9201 绑环回会断 console）。无防火墙时这些口对公网可达，是部署问题不是代码洞 |
+| `[x]` | 登录限速与 JWT 禁用即失效 | 本地登录/TOTP/GitLab 兑换：10 次失败锁 15 分钟（内存，按 IP+身份，429）。`JwtAuthFilter` 每次查库：禁用/软删 → 401；角色以库为准。发票走 `requireUser` |
+| `[x]` | GitLab 回调一次性 code | 回调 JWT 存内存 60s；跳转 `/login?code=`；`POST /api/auth/gitlab/exchange` 兑换。不再把 JWT 放 query |
 | `[~]` | 录像目录权限与校验和 | 日分区 `0755`、录像叶子 `0777`（供 guacd）、cast `0640`；END 记 sha256+size。**缺**独立配额 |
 
 ### 9.2 待修复（上线门槛）
@@ -295,8 +297,7 @@
 |------|------|------|
 | `[~]` | 内部 API 鉴权与反代隔离 | **Console nginx 已 404：** `/api/internal`、`/api/sessions/internal`、`/api/opsctl`（`deploy/nginx.conf`；woopsctl 仍走 Gateway PUBLIC）。Gateway→Java 仍直连 `:9100`。**仍缺：** Java 内部口 `permitAll`（本机/内网直打 9100 仍可验票）；Vite 开发代理未排除；验票响应仍带桌面密码 |
 | `[ ]` | 凭据密文库 | `desktop_password`、TOTP secret 现明文/半明文；票据内带桌面密码。按 §3：AES-GCM + 主密钥；Gateway 按票据向 Java 取一次性凭据，不把长期密码放进可被 internal 验票读出的 JWT |
-| `[ ]` | 登录与 JWT 生命周期 | 无登录/TOTP 速率限制、无密码复杂度。JWT 12h、角色在票内、存在 `localStorage`。`SessionController` 发票不走 `AccessService.requireUser`，禁用用户后仍可能开壳。**要做：** 爆破防护；密码策略；每次受保护请求（含发票）查库校验启用/角色；生产拒绝未改的 bootstrap 密码 |
-| `[ ]` | GitLab 回调不把 token 放 query | 现状 `/login?token=` 进历史、Referer、反代日志。改为一次性 code、fragment 或 HttpOnly cookie |
+| `[ ]` | 密码策略 | 无最小长度/复杂度；生产不拒绝未改的 bootstrap `admin123` |
 | `[ ]` | 端口映射目标 denylist / 正向暴露 | 反向 SSRF：Gateway 可拨任意可达地址（含 Docker `127.0.0.1`）。正向默认 listen `0.0.0.0` 把 20000–21000 挂到宿主公网网卡。**要做：** 至少拒绝 metadata/loopback/link-local（反向）；正向 listen 生产默认本机或须显式确认。woopsctl 临时映射已有独立 scope，仍无 host/port allowlist |
 | `[ ]` | 文件路径沙箱 | 见 §5.3；无沙箱时可见用户 = 目标机 Agent 用户（通常 root/SYSTEM）可读改全盘 |
 | `[ ]` | 安全响应头 | nginx/Java 无 CSP / HSTS / X-Frame-Options。JWT 在 `localStorage`，XSS 即可偷会话（当前未见 `v-html`，面较小） |

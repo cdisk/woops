@@ -1,6 +1,6 @@
 package com.ops.control.auth;
 
-import com.ops.control.common.OpsProperties;
+import com.ops.control.user.UserEntity;
 import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -39,13 +39,14 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         if (header != null && header.startsWith("Bearer ")) {
             try {
                 Claims claims = authService.parse(header.substring(7));
-                if (!authService.isAccessToken(claims)) {
+                UserEntity user = authService.resolveAccessUser(claims);
+                if (user == null) {
                     SecurityContextHolder.clearContext();
                 } else {
                     var auth = new UsernamePasswordAuthenticationToken(
-                            claims.getSubject(),
+                            user.getId().toString(),
                             null,
-                            List.of(new SimpleGrantedAuthority("ROLE_" + claims.get("role", String.class)))
+                            List.of(new SimpleGrantedAuthority("ROLE_" + user.getRole()))
                     );
                     auth.setDetails(claims);
                     SecurityContextHolder.getContext().setAuthentication(auth);

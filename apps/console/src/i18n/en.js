@@ -81,6 +81,7 @@ export default {
       'Local admin can sign in by default; configure OPS_GITLAB_* to switch to GitLab. Local password login requires TOTP.',
     failed: 'Sign-in failed',
     gitlabFailed: 'GitLab sign-in failed',
+    tooManyAttempts: 'Too many attempts. Try again in 15 minutes.',
     totpSetupHint:
       'Scan the QR code with an authenticator app (or enter the secret), then enter the 6-digit code to finish setup.',
     totpVerifyHint: 'Enter the 6-digit code from your authenticator app.',

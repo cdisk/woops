@@ -298,6 +298,27 @@ public class AuthService {
         return purpose == null || PURPOSE_ACCESS.equals(purpose);
     }
 
+    /**
+     * Access JWT → live user. Disabled / deleted / missing users are rejected
+     * so disable takes effect before the 12h expiry.
+     */
+    public UserEntity resolveAccessUser(Claims claims) {
+        if (!isAccessToken(claims) || claims.getSubject() == null) {
+            return null;
+        }
+        UUID id;
+        try {
+            id = UUID.fromString(claims.getSubject());
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+        UserEntity user = users.findById(id).orElse(null);
+        if (user == null || user.isDeleted() || !user.isEnabled()) {
+            return null;
+        }
+        return user;
+    }
+
     public UUID requireUserId(String token) {
         return UUID.fromString(parse(token).getSubject());
     }

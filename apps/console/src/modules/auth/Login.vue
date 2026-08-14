@@ -130,7 +130,7 @@ const qrCodeDataUrl = ref('')
 const totpCode = ref('')
 const totpInputRef = ref(null)
 
-async function applySession(data) {
+async function applySession(data, { replace = false } = {}) {
   setSession({
     token: data.accessToken,
     username: data.user.username,
@@ -138,13 +138,11 @@ async function applySession(data) {
     role: data.user.role
   })
   await refreshMe()
-  router.push('/home')
-}
-
-async function applyToken(token) {
-  setSession({ token })
-  await refreshMe()
-  router.replace('/home')
+  if (replace) {
+    router.replace('/home')
+  } else {
+    router.push('/home')
+  }
 }
 
 function resetChallenge() {
@@ -199,7 +197,7 @@ async function onSubmit() {
     }
     ElMessage.error(t('login.failed'))
   } catch (e) {
-    ElMessage.error(e.response?.data?.error || t('login.failed'))
+    ElMessage.error(loginErrorMessage(e, 'login.failed'))
   } finally {
     loading.value = false
   }
@@ -239,7 +237,17 @@ async function onVerify() {
   }
 }
 
+function loginErrorMessage(e, fallbackKey) {
+  if (e.response?.status === 429 || e.response?.data?.error === 'too many attempts') {
+    return t('login.tooManyAttempts')
+  }
+  return e.response?.data?.error || t(fallbackKey)
+}
+
 function totpErrorMessage(e) {
+  if (e.response?.status === 429 || e.response?.data?.error === 'too many attempts') {
+    return t('login.tooManyAttempts')
+  }
   const raw = e.response?.data?.error
   if (raw === 'invalid totp code' || raw === 'totp not enabled') {
     return t('login.totpFailed')
@@ -252,7 +260,7 @@ function onGitLab() {
 }
 
 onMounted(async () => {
-  const qToken = route.query.token
+  const qCode = route.query.code
   const qError = route.query.error
   if (qError) {
     errorMsg.value = String(qError)
@@ -267,13 +275,15 @@ onMounted(async () => {
   } finally {
     loadingOptions.value = false
   }
-  if (qToken && typeof qToken === 'string') {
+  if (qCode && typeof qCode === 'string') {
     try {
-      await applyToken(qToken)
+      const { data } = await api.post('/auth/gitlab/exchange', { code: qCode })
+      await applySession(data, { replace: true })
       return
     } catch (e) {
       clearSession()
-      errorMsg.value = e.response?.data?.error || t('login.gitlabFailed')
+      errorMsg.value = loginErrorMessage(e, 'login.gitlabFailed')
+      router.replace({ path: '/login', query: qError ? { error: qError } : {} })
     }
   }
 })
