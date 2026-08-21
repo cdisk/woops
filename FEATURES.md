@@ -4,7 +4,7 @@
 > 任何功能新增、完成、搁置、行为变更，都必须先读本文件，并在同一变更中更新对应条目的状态与说明。  
 > README 只保留快速启动。历史设计稿 `bastion_architecture_design_*.plan.md` 不必再读。
 
-**最后更新：** 2026-08-14（登录限速、禁用即失效 JWT、GitLab 一次性 code）
+**最后更新：** 2026-08-21（首页异常/已忽略列表展示分组）
 
 ---
 
@@ -120,7 +120,7 @@
 | `[x]` | 监控扁表时序 | `monitor_data(asset_id,item_id,instance,time,value)`；字典 `monitor_item_def`；保留 **3 年**；无 JSON 快照 |
 | `[x]` | 监控曲线 / 聚合 | `GET …/metrics/series`；grain=minute\|day\|month |
 | `[x]` | 监控预警 | 全局阈值（优先 %）；入库评估；`asset_alert_status`；配置 CRUD；**仅超管**可见菜单与 API。首页异常含离线；忽略按 **资产+监控项**（`asset_alert_ignores`，离线项 `host.online`） |
-| `[x]` | 首页概览 | 资产总数 / 在线 / 异常（**含离线**，与监控预警并列）；登录进首页。异常按监控项可 **忽略 / 取消忽略**（如只忽略离线或 CPU，不影响该资产其他项；忽略后不占异常列表；「异常资产」标题右侧打开已忽略弹窗 `IgnoredAlertsDialog`；可见资产即可操作；控制审计 `MONITOR`/`IGNORE`/`UNIGNORE`） |
+| `[x]` | 首页概览 | 资产总数 / 在线 / 异常（**含离线**，与监控预警并列）；登录进首页。异常按监控项可 **忽略 / 取消忽略**（如只忽略离线或 CPU，不影响该资产其他项；忽略后不占异常列表；「异常资产」标题右侧打开已忽略弹窗 `IgnoredAlertsDialog`；可见资产即可操作；控制审计 `MONITOR`/`IGNORE`/`UNIGNORE`）。异常列表与已忽略清单均展示 **分组**（`groupId`/`groupName`，未分组显示「未分组」；已忽略弹窗加宽） |
 | `[x]` | 资产监控页 | 操作「监控」→ 新浏览器标签 `/assets/:id/monitor`（无侧栏，同会话页）；复用 `AssetMonitorPanel`；顶部规格；各图下最高/平均/最低；标题左侧关闭（有 opener 则关标签） |
 | `[ ]` | 资产列表指标摘要 | 可读 `monitor_latest`；未做 |
 | `[x]` | Agent 内置 HTTP 正向代理 | 插件式 `go/internal/agent/plugins/proxy`：`TryStart` 软失败不影响控制面；`agent.yaml` `proxy.*`（enabled/listen/username/password/allowCIDRs/allowGlobal）；CONNECT + forward；账密强制；来源 CIDR；`allowGlobal=false` 仅 ops host（`gateway` 主机 :gwPort+`:9100`）；全局时拒 loopback/元数据；**有 `gatewayProxy` 时入站出站经上游 CONNECT/forward 串联**（防环：拒连上游自身） |

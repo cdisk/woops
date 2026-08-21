@@ -2,13 +2,18 @@
   <el-dialog
     :model-value="modelValue"
     :title="t('home.ignoredAlerts')"
-    width="960px"
+    width="1100px"
     @update:model-value="$emit('update:modelValue', $event)"
   >
     <p class="hint">{{ t('home.ignoredHint') }}</p>
     <el-table :data="rows" size="small" stripe :empty-text="t('home.emptyIgnored')" max-height="420">
-      <el-table-column prop="displayName" :label="t('common.name')" min-width="140" />
-      <el-table-column prop="hostname" :label="t('home.hostname')" min-width="120" />
+      <el-table-column prop="displayName" :label="t('common.name')" min-width="140" show-overflow-tooltip />
+      <el-table-column prop="hostname" :label="t('home.hostname')" min-width="120" show-overflow-tooltip />
+      <el-table-column :label="t('common.group')" width="120" show-overflow-tooltip>
+        <template #default="{ row }">
+          {{ row.groupId ? (row.groupName || t('common.emDash')) : t('common.ungrouped') }}
+        </template>
+      </el-table-column>
       <el-table-column :label="t('home.ignoredItem')" min-width="160">
         <template #default="{ row }">{{ itemLabel(row) }}</template>
       </el-table-column>

@@ -4,6 +4,7 @@ import com.ops.control.agent.AgentService;
 import com.ops.control.asset.AssetEntity;
 import com.ops.control.asset.AssetRepository;
 import com.ops.control.controlaudit.ControlAuditService;
+import com.ops.control.group.GroupService;
 import com.ops.control.user.UserEntity;
 import jakarta.transaction.Transactional;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -25,6 +26,7 @@ public class MetricsService {
     private final AssetAlertStatusRepository alertStatus;
     private final AssetAlertIgnoreRepository alertIgnores;
     private final ControlAuditService audit;
+    private final GroupService groups;
     private final JdbcTemplate jdbc;
 
     public MetricsService(
@@ -37,6 +39,7 @@ public class MetricsService {
             AssetAlertStatusRepository alertStatus,
             AssetAlertIgnoreRepository alertIgnores,
             ControlAuditService audit,
+            GroupService groups,
             JdbcTemplate jdbc) {
         this.agents = agents;
         this.assets = assets;
@@ -47,6 +50,7 @@ public class MetricsService {
         this.alertStatus = alertStatus;
         this.alertIgnores = alertIgnores;
         this.audit = audit;
+        this.groups = groups;
         this.jdbc = jdbc;
     }
 
@@ -257,6 +261,7 @@ public class MetricsService {
                     .add(new AlertIssueLogic.Point(row.getItemId(), row.getInstance(), row.getValue()));
         }
 
+        Map<UUID, String> groupNames = groups.nameById();
         List<Map<String, Object>> firing = new ArrayList<>();
         for (AssetEntity a : allAssets) {
             List<AlertIssueLogic.Issue> metricHits = AlertIssueLogic.metricHits(
@@ -266,7 +271,7 @@ public class MetricsService {
             if (visible.isEmpty()) {
                 continue;
             }
-            firing.add(abnormalView(a, visible));
+            firing.add(abnormalView(a, visible, groupNames));
         }
         firing.sort(Comparator
                 .comparing((Map<String, Object> m) -> Boolean.TRUE.equals(m.get("online")))
@@ -279,7 +284,7 @@ public class MetricsService {
             if (a == null) {
                 continue;
             }
-            ignoredAlerts.add(ignoreView(a, ig, itemNames));
+            ignoredAlerts.add(ignoreView(a, ig, itemNames, groupNames));
         }
 
         Map<String, Object> out = new LinkedHashMap<>();
@@ -314,7 +319,7 @@ public class MetricsService {
                     null,
                     ControlAuditService.jsonDetail(Map.of("itemId", id)));
         }
-        return ignoreView(asset, row, itemNameMap());
+        return ignoreView(asset, row, itemNameMap(), groups.nameById());
     }
 
     @Transactional
@@ -336,7 +341,8 @@ public class MetricsService {
         }
     }
 
-    private Map<String, Object> abnormalView(AssetEntity a, List<AlertIssueLogic.Issue> issues) {
+    private Map<String, Object> abnormalView(
+            AssetEntity a, List<AlertIssueLogic.Issue> issues, Map<UUID, String> groupNames) {
         List<Map<String, Object>> issueViews = new ArrayList<>();
         List<String> labels = new ArrayList<>();
         for (AlertIssueLogic.Issue issue : issues) {
@@ -358,23 +364,31 @@ public class MetricsService {
         m.put("assetId", a.getId().toString());
         m.put("displayName", a.getDisplayName() != null ? a.getDisplayName() : a.getId().toString());
         m.put("hostname", a.getHostname() != null ? a.getHostname() : "");
+        putGroupFields(m, a, groupNames);
         m.put("online", a.isOnline());
         m.put("summary", String.join("; ", labels));
         m.put("issues", issueViews);
         return m;
     }
 
-    private Map<String, Object> ignoreView(AssetEntity a, AssetAlertIgnoreEntity ig, Map<String, String> itemNames) {
+    private Map<String, Object> ignoreView(
+            AssetEntity a, AssetAlertIgnoreEntity ig, Map<String, String> itemNames, Map<UUID, String> groupNames) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("assetId", a.getId().toString());
         m.put("displayName", a.getDisplayName() != null ? a.getDisplayName() : a.getId().toString());
         m.put("hostname", a.getHostname() != null ? a.getHostname() : "");
+        putGroupFields(m, a, groupNames);
         m.put("online", a.isOnline());
         m.put("itemId", ig.getItemId());
         m.put("kind", AlertIssueLogic.kindOf(ig.getItemId()));
         m.put("itemName", itemNames.getOrDefault(ig.getItemId(), ig.getItemId()));
         m.put("ignoredAt", ig.getIgnoredAt() != null ? ig.getIgnoredAt().toString() : "");
         return m;
+    }
+
+    private static void putGroupFields(Map<String, Object> m, AssetEntity a, Map<UUID, String> groupNames) {
+        m.put("groupId", a.getGroupId() == null ? null : a.getGroupId().toString());
+        m.put("groupName", a.getGroupId() == null ? "" : groupNames.getOrDefault(a.getGroupId(), ""));
     }
 
     private Map<String, String> itemNameMap() {
