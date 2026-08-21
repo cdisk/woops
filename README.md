@@ -17,6 +17,26 @@ Shell · 文件 · RDP/VNC · 端口映射 · 轻量监控 · 审计回放 · Gi
 
 Teleport 也是出站隧道模型，偏零信任大平台；Woops 更偏「少装几套、一键装完能干活」的运维面板。
 
+## 界面预览
+
+截图在 [`docs/screenshots/`](./docs/screenshots/)（IP 等已打码）。
+
+| 首页 · 异常资产与分组 | 资产列表 · 分组树与会话入口 |
+|:---:|:---:|
+| ![首页](docs/screenshots/home.png) | ![资产](docs/screenshots/assets.png) |
+
+| Shell（Agent 原生，不依赖 sshd） | 文件管理 |
+|:---:|:---:|
+| ![Shell](docs/screenshots/shell.png) | ![文件](docs/screenshots/files.png) |
+
+| 资产监控 | 操作审计 · 会话回放入口 |
+|:---:|:---:|
+| ![监控](docs/screenshots/monitor.png) | ![审计](docs/screenshots/audit.png) |
+
+| 资产设置 · 桌面凭据 / 端口映射 / 部署 Token |
+|:---:|
+| ![资产设置](docs/screenshots/asset-settings.png) |
+
 ## 快速开始
 
 ### 0) 环境变量（必做）
@@ -31,7 +51,26 @@ copy .env.example .env
 
 ### 1) 前置
 
-JDK 21、Maven、Go 1.22+、Node 20+、Docker（Postgres / 可选 guacd）。
+JDK 21、Maven、Go 1.22+、Node 20+、Docker（Postgres / 可选 guacd）、OpenSSL（生成自签证书时用）。
+
+### 1.5) Gateway TLS 证书（克隆后需自己生成，编译不会自动出）
+
+`deploy/tls/` **已 gitignore**，仓库里没有证书；`mvn` / `go build` / `npm` **都不会**生成它。
+
+| 场景 | 是否需要 |
+|------|----------|
+| 只编译二进制 / 只跑 control-api + Postgres | 可不做 |
+| 本机起 Gateway（Agent 走 `wss`）或 Docker 全栈 | **必须** |
+| 本机 Vite Console | 有 `deploy/tls/gateway.*` 时才启用 HTTPS；没有也能起，但是 HTTP |
+
+自签示例（Linux / macOS / Git Bash；需本机有 `openssl`）：
+
+```bash
+# 仓库根目录；按你的访问地址改 --host / --ip（可重复）
+./deploy/gen-gateway-tls.sh --host 127.0.0.1 --ip 127.0.0.1
+```
+
+脚本写入 `deploy/tls/gateway.crt` + `gateway.key`，并打印 `OPS_GATEWAY_TLS_SPKI_SHA256=...`。把该 pin 与证书绝对路径写入 `.env`（变量名见 [`.env.example`](./.env.example)）。已有公有 CA 证书时，把文件放进 `deploy/tls/`（或自定路径）并算同一 pin 即可，不必用自签脚本。
 
 ### 2) 编译
 
@@ -52,6 +91,8 @@ npm run build
 
 ### 3) 启动（本机进程 + Docker 只跑库）
 
+先完成 **§0**；若要起 Gateway / Agent，再完成 **§1.5**。
+
 ```powershell
 cd deploy
 docker compose up -d postgres
@@ -65,7 +106,7 @@ cd ..
 cd apps\control-api
 mvn -DskipTests spring-boot:run
 
-# 终端 B — gateway（在 go/ 下）
+# 终端 B — gateway（在 go/ 下；需 .env 里 TLS 路径与 pin）
 cd go
 .\bin\gateway.exe
 
@@ -74,7 +115,7 @@ cd apps\console
 npm run dev
 ```
 
-浏览器打开 `https://127.0.0.1:5173`（自签证书需信任一次）。  
+浏览器打开 `https://127.0.0.1:5173`（已按 §1.5 放好证书时；自签需信任一次）。  
 默认账号：`admin` / `admin123`（未启用 GitLab 时；首次登录须绑定 TOTP）。**上线前务必改密码与密钥。**
 
 本机覆盖可用 `.env.local`（gitignore）。加载顺序：`.env` → `.env.local`。
@@ -83,24 +124,24 @@ npm run dev
 
 1. 控制台创建资产 → 复制安装命令完成注册（得到 `asset-id`、`agent-token`）。
 2. 凭据放在 `go/` 旁：`asset-id`、`agent-token`（已 gitignore）。
-3. 参考 [`go/agent.example.yaml`](./go/agent.example.yaml) 写本机 `agent.local.yaml`（`gateway` + pin）。
+3. 参考 [`go/agent.example.yaml`](./go/agent.example.yaml) 写本机 `agent.local.yaml`（`gateway` + **与 `.env` 相同的** `gatewayTlsSpkiSha256` pin）。
 4. 启动：`.\bin\agent.exe -config agent.local.yaml`
 
 ### 5) 全栈 Docker（可选）
 
 ```powershell
-# 先准备 TLS：deploy/gen-gateway-tls.sh → deploy/tls/，pin 写入 .env
+# 必先做 §1.5：deploy/tls/ 有证书，且 .env 已填 pin（compose 挂载 deploy/tls）
 cd deploy
 docker compose --env-file ..\.env --profile full --profile desktop up -d --build
 ```
 
-服务器可将 `deploy/env.prod.example` 复制为 `/opt/ops/.env` 再改域名与密钥。
+服务器可将 `deploy/env.prod.example` 复制为 `/opt/ops/.env` 再改域名与密钥；证书仍放服务器本地 `deploy/tls/`（勿提交）。
 
 ## 安全提示
 
 - 生产必须更换 `OPS_JWT_SECRET`、`OPS_TICKET_SECRET`、管理员密码。
-- Gateway 生产走 `https`/`wss`；自签场景用 SPKI pin（`OPS_GATEWAY_TLS_SPKI_SHA256`），**不要**关证书校验。
-- 不要把真实 `.env`、TLS 私钥、`agent-token` 提交到公开仓库。
+- Gateway 生产走 `https`/`wss`；自签 / 动态 IP 用 SPKI pin（`OPS_GATEWAY_TLS_SPKI_SHA256`），**不要**关证书校验。
+- 不要把真实 `.env`、`deploy/tls/` 私钥、`agent-token` 提交到公开仓库（`deploy/tls/` 已 gitignore）。
 
 ## 端口
 
@@ -124,7 +165,7 @@ apps/console         Vue3 + Element Plus（en/zh）
 go/cmd/{gateway,agent,woopsctl}
 go/internal/opsctl   woopsctl 内部实现
 deploy/              docker-compose、Dockerfile、env.prod.example、gen-gateway-tls.sh
-docs/                如 woopsctl GitLab CI 说明
+docs/                woopsctl CI 说明、screenshots/ 界面截图
 ```
 
 ## 反馈
