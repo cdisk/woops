@@ -11,13 +11,18 @@ gatewayTlsSpkiSha256: REPLACE_WITH_OPS_GATEWAY_TLS_SPKI_SHA256
 # 可选：Agent 访问 Gateway 时经上游 HTTP 代理
 # gatewayProxy: http://user:pass@10.0.0.1:3128
 
-# 可选：本机入站正向代理插件（软失败，不影响控制面）
+# 可选：本机入站正向代理插件（软失败，不影响控制面）。
+# 给更深内网的 Agent 当跳板用：对端设 https_proxy=本机，写入对方 gatewayProxy。
 # proxy:
 #   enabled: false
 #   listen: "0.0.0.0:3128"
-#   username: "proxyuser"
-#   password: "changeme"
-#   allowCIDRs:
+#   username: "proxyuser"          # 必填；无匿名
+#   password: "changeme"           # 必填
+#   allowCIDRs:                    # 谁可以连上本代理（客户端来源 IP）
 #     - "10.0.0.0/8"
 #     - "192.168.0.0/16"
+#   # allowGlobal：代理「出站目标」范围（与 allowCIDRs 无关）
+#   #   false（推荐）：只允许转发到 ops 主机 = 上方 gateway 的主机名/IP
+#   #                 + 其端口（如 9200）以及 :9100；给下级 Agent 上线 Gateway 用
+#   #   true：允许更广目标（仍拒绝 loopback / 链路本地 / 云元数据等）；勿当开放上网出口
 #   allowGlobal: false

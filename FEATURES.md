@@ -4,7 +4,7 @@
 > 任何功能新增、完成、搁置、行为变更，都必须先读本文件，并在同一变更中更新对应条目的状态与说明。  
 > README 只保留快速启动。历史设计稿 `bastion_architecture_design_*.plan.md` 不必再读。
 
-**最后更新：** 2026-08-21（README 界面截图；docs/screenshots）
+**最后更新：** 2026-08-21（README 强调 Agent 自带受限 proxy）
 
 ---
 
@@ -50,7 +50,7 @@
 | `[x]` | guacd sidecar | `deploy/docker-compose.yml` → `guacamole/guacd:1.5.5`（发布宿主 `:4822`）；Gateway `OPS_GUACD_ADDR=127.0.0.1:4822`、`OPS_GUAC_BRIDGE_HOST=host.docker.internal`；console/control-api/guacd 配 `extra_hosts: host.docker.internal:host-gateway` |
 | `[x]` | `data/ops-audit/` 卷 | 运行态 JSONL **与会话录像**的本地根目录；`OPS_AUDIT_DIR`（默认 `./data/ops-audit`；Compose `/data/ops-audit` 同时挂 control-api / gateway / guacd）；已 gitignore |
 | `[ ]` | `openapi/` 契约 | Java REST → Vue TS client |
-| `[~]` | 运维文档 | CI 已有 [`docs/woopsctl-gitlab-ci.md`](docs/woopsctl-gitlab-ci.md)；README 已写清 **`deploy/tls` 不入库、编译不自动生成**、须跑 `gen-gateway-tls.sh`（或自备证书+pin）；README **界面预览**截图在 [`docs/screenshots/`](docs/screenshots/)；仍缺 GitLab OAuth / Agent 安装运维文 |
+| `[~]` | 运维文档 | CI 已有 [`docs/woopsctl-gitlab-ci.md`](docs/woopsctl-gitlab-ci.md)；README 已写清 **`deploy/tls` 不入库、编译不自动生成**、须跑 `gen-gateway-tls.sh`（或自备证书+pin）；README **界面预览**截图在 [`docs/screenshots/`](docs/screenshots/)；README §4 已拆 **方法 1 安装码** / **方法 2 本机调试**；README 已有 **网闸多级内网**（Agent **自带受限** `proxy.*`：账密 / CIDR / 默认仅 ops；`gatewayProxy` 串联）拓扑说明；仍缺 GitLab OAuth / Agent 安装运维专文 |
 | `[x]` | 健康检查 | control-api `/api/health`、gateway `/health` |
 | `[x]` | 公网/LAN URL 解析 | `PublicUrlResolver`：配置了非 loopback 的 `OPS_GATEWAY_PUBLIC_*` / `OPS_CONTROL_PUBLIC_HTTP` 时用配置；仅 loopback 时按浏览器 Origin 改写 LAN IP；`GatewayClient` 走 `OPS_GATEWAY_INTERNAL_HTTP` |
 | `[x]` | 代码组织约定 | Java 按业务模块（`PageSupport`、`AccessService`、`SessionTicketService` → `ProtocolRegistry` + `protocol.*TicketIssuer`）。Go 最终分类：Agent `agent/{app,core,sessions,services,plugins,infra,sessionreg}`；Gateway `gateway/{app,core,sessions,services,plugins,infra}`。`app` 是唯一具体组合根并可依赖全部功能；`core` 只依赖注入契约，不得反向依赖 `sessions/services/plugins`；功能实现不得跨 `sessions/services/plugins` 横向依赖另一功能。共享契约位于 `internal/{protocol,sessioncore,sessionws,tlsutil,wsutil,hostinfo}`；UDP 帧为 `protocol/datagram`，网卡筛选为 `hostinfo/netiface`；Guacamole 实现由 `gateway/sessions/desktop/guac` 私有拥有。Gateway 验票边界只返回 `BaseClaims`+原始 JSON，`sessioncore.BridgeSpec` 提供通用桥接编排；`cmd/{agent,gateway}` 只进入各自 `app`。Vue `features/registry.js` 是路由/资产动作唯一聚合点；忌过度抽象 |

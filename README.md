@@ -17,6 +17,52 @@ Shell · 文件 · RDP/VNC · 端口映射 · 轻量监控 · 审计回放 · Gi
 
 Teleport 也是出站隧道模型，偏零信任大平台；Woops 更偏「少装几套、一键装完能干活」的运维面板。
 
+## 网闸与多级内网（Agent 自带受限 proxy）
+
+传统堡垒要「中心能拨到资产」；Woops 反过来：**每台资产上的 Agent 只出站**连 Gateway（HTTPS / WSS）。防火墙可以挡住从公网打进内网，只要内网里有一台机器能摸到 Gateway（或摸到上一跳代理），更深的机器也能上线。
+
+**不必另装 Squid / nginx 正向代理。** Agent **自带**可选的入站 HTTP 正向代理插件（`agent.yaml` → `proxy.*`），与管控共用一个二进制；默认关闭，打开后仍是**受限**代理，不是开放上网出口：
+
+| 限制 | 说明 |
+|------|------|
+| 账密强制 | 必须配置 `username` / `password`，无匿名代理 |
+| 来源 CIDR | `allowCIDRs` 白名单，只有指定网段能连上代理端口 |
+| 默认只通 ops | `allowGlobal=false`（默认）时，出站目标仅限 Gateway 等 ops 主机（`gateway` 主机及其端口 / `:9100`），**不能**当通用翻墙或任意网站代理 |
+| 可选放开 | 仅当明确设 `allowGlobal=true` 才允许更广目标；仍拒绝 loopback / 云元数据等危险地址 |
+| 串联防环 | 本机若已有 `gatewayProxy`，入站流量会经上游再出站，并拒绝连回自身代理，避免环路 |
+
+典型拓扑：
+
+```text
+  ┌─ 公网 / DMZ ─┐         防火墙          ┌──────── 内网 ────────┐
+  │  Woops       │  ←———— firewall ————→  │  跳板机 A            │
+  │  Gateway     │                        │  Agent（开受限 proxy）│
+  │  Console …   │                        │         │            │
+  └──────────────┘                        │         │ proxy      │
+                                          │         ▼            │
+                                          │  业务机 B / C …      │
+                                          │  Agent（经 A 出站）  │
+                                          └──────────────────────┘
+```
+
+用一句话对照常见场景：
+
+`互联网上的 Woops（Gateway） ←firewall→ 内网跳板（Agent 自带受限 proxy） ←proxy→ 更深内网（Agent）`
+
+| 角色 | 做什么 |
+|------|--------|
+| **Gateway（互联网侧）** | 公网可达的 `https`/`wss`；Agent / 安装脚本都连这里 |
+| **跳板机 A（能出网或能到 Gateway）** | 正常安装 Agent；在 `agent.yaml` 打开入站 **`proxy.*`**（账密 + `allowCIDRs`；默认只转发到 ops） |
+| **更深内网 B** | 安装前设 `https_proxy`/`http_proxy` 指向 **A 的代理**；脚本写入 `gatewayProxy`。之后 B→Gateway 的 WSS 经 A 的受限 proxy 出站 |
+| **再深一层 C（只达 B）** | 同理：`https_proxy` 指向 **B**；B 若同时开了 `proxy.*`，且自己带 `gatewayProxy=A`，则链路为 **C → B → A → Gateway** |
+
+要点：
+
+- **不用**再为每层网闸单独搭 FRP / SSH / 第三方正向代理；跳板就是已纳入管控、并打开**受限 proxy** 的 Agent。
+- Agent **只出站**，不要求 Gateway 能主动拨进内网。
+- 安装与日常上线认同一套代理环境变量；控制台「生成安装链接」弹窗里有 `https_proxy` 写法与密码编码说明。
+- 配置示例见 [`go/agent.example.yaml`](./go/agent.example.yaml)（`gatewayProxy`、`proxy.*`）。
+
 ## 界面预览
 
 截图在 [`docs/screenshots/`](./docs/screenshots/)（IP 等已打码）。
@@ -122,10 +168,35 @@ npm run dev
 
 ### 4) 接入一台主机（Agent）
 
-1. 控制台创建资产 → 复制安装命令完成注册（得到 `asset-id`、`agent-token`）。
-2. 凭据放在 `go/` 旁：`asset-id`、`agent-token`（已 gitignore）。
-3. 参考 [`go/agent.example.yaml`](./go/agent.example.yaml) 写本机 `agent.local.yaml`（`gateway` + **与 `.env` 相同的** `gatewayTlsSpkiSha256` pin）。
-4. 启动：`.\bin\agent.exe -config agent.local.yaml`
+两条路：**方法 1** 给真实/虚拟机装服务（推荐）；**方法 2** 只适合在本仓库旁调试 Agent。
+
+#### 方法 1 — 控制台安装码（推荐）
+
+1. 本机 **Gateway + control-api** 已按 §3 跑着，且 §1.5 的 pin 已写入 `.env`（安装脚本/Agent 靠 pin 校验证书）。
+2. 打开控制台 → **资产** → 左侧先选中目标**分组**（选「全部」不能发码）→ **生成安装链接**。
+3. 在弹窗复制对应系统的命令，到目标机执行：
+   - **Linux**：`curl … | bash`
+   - **Windows**：`curl.exe` 下载 `install.ps1` 再 `powershell -File …`（须管理员；弹窗有无 curl 时的折叠说明）
+4. 安装码约 **15 分钟**有效、期内可多次用；过期重新生成。脚本会下载 Agent、向 Gateway 注册，并落盘服务（Linux 优先 `/usr/local/bin/woops-agent`，Windows 服务名 `woops-agent`）。
+5. 控制台资产列表出现该主机且为「在线」即成功。重装会保留 `asset-id`、轮换 `agent-token`。
+
+网闸 / 多级内网：在能出网的机器上装 Agent，打开**自带受限**入站 `proxy.*` 作跳板；更深主机安装前设 `https_proxy` 指向该跳板（写入 `gatewayProxy`）。详见上文 **「网闸与多级内网（Agent 自带受限 proxy）」**；控制台安装弹窗也有变量示例。
+
+#### 方法 2 — 本机开发调试（不装成系统服务）
+
+用于改 Agent 代码后前台跑，**不是**生产装机方式。
+
+1. 仍建议先用**方法 1**在某台机装一次，或走控制台注册拿到一对凭据；把 `asset-id`、`agent-token` 放到 `go/` 目录旁（已 gitignore）。
+2. 参考 [`go/agent.example.yaml`](./go/agent.example.yaml) 写 `go/agent.local.yaml`（`gateway` + **与 `.env` 相同的** `gatewayTlsSpkiSha256`）。
+3. 编译并启动：
+
+```powershell
+cd go
+.\scripts\build-agent-windows.ps1
+.\bin\agent.exe -config agent.local.yaml
+```
+
+Linux 用 `go/scripts/build-agent-linux.sh` 后在同机运行对应二进制。
 
 ### 5) 全栈 Docker（可选）
 
