@@ -42,6 +42,16 @@
           >{{ item.title }}</el-menu-item>
         </el-sub-menu>
       </el-menu>
+      <div class="aside-footer">
+        <div class="aside-version" :title="t('nav.version')">v{{ APP_VERSION }}</div>
+        <a
+          class="aside-repo"
+          :href="APP_REPO_URL"
+          target="_blank"
+          rel="noopener noreferrer"
+          :title="t('nav.repository')"
+        >{{ APP_REPO_HOST_PATH }}</a>
+      </div>
     </el-aside>
     <el-container class="main-wrap">
       <el-header v-if="!isReplay" class="header" height="var(--ops-header-height)">
@@ -71,6 +81,7 @@ import {
   IconUsers
 } from '@tabler/icons-vue'
 import { canManageUsers, clearSession, getDisplayName, getRole, isSuperAdmin, refreshMe } from './auth'
+import { APP_REPO_HOST_PATH, APP_REPO_URL, APP_VERSION } from './appMeta'
 import { auditMenu } from '../features/registry'
 
 const { t } = useI18n()
@@ -164,6 +175,38 @@ onMounted(async () => {
   border-right: none;
   padding: 10px 8px;
   background: transparent;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.aside-footer {
+  flex-shrink: 0;
+  padding: 12px 16px 14px;
+  border-top: 1px solid var(--ops-border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.aside-version {
+  font-family: var(--ops-font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ops-text-muted);
+  letter-spacing: -0.01em;
+}
+
+.aside-repo {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--ops-text-muted);
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.aside-repo:hover {
+  color: var(--ops-color-primary);
 }
 
 .side-menu :deep(.el-menu-item),

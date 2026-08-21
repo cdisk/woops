@@ -4,7 +4,7 @@
 > 任何功能新增、完成、搁置、行为变更，都必须先读本文件，并在同一变更中更新对应条目的状态与说明。  
 > README 只保留快速启动。历史设计稿 `bastion_architecture_design_*.plan.md` 不必再读。
 
-**最后更新：** 2026-08-21（首页异常/已忽略列表展示分组）
+**最后更新：** 2026-08-21（侧栏底部版本号与 Gitee 仓库链接）
 
 ---
 
@@ -59,7 +59,7 @@
 | `[~]` | 协议兼容测试 / 集成测试 | `internal/protocol/control` open_session nested-params golden 已有；Agent→Gateway→echo / Testcontainers 仍缺 |
 | `[x]` | 运行时 | 控制面 **Java 21** + Spring Boot 3；Go 1.22+；Vue 3 + Element Plus；图标 `@tabler/icons-vue` |
 | `[x]` | Console 中英 i18n | `vue-i18n`（`legacy:false`）；仅 `en`/`zh`；**默认英文**，`navigator.language` 以 `zh` 开头则中文；目录 `apps/console/src/i18n/{en,zh,index}.js`；`App.vue` 用 `el-config-provider` 同步 Element Plus locale；SFC `useI18n()`，纯 JS `import { t } from '…/i18n'`；控制台可见文案已迁入目录（含 Layout/Login/资产/用户/审计/会话/文件/桌面/端口映射/监控等） |
-| `[x]` | Console 视觉（冷静工程风） | 全局 `styles/{tokens,element-theme,base}.css`；主色 `#2F5D9F`、浅色底；字体 **IBM Plex Sans/Mono** 经 `@fontsource` **同源自托管**（无 Google Fonts CDN）；登录品牌首屏；Layout 侧栏图标+**顶栏显示当前页标题**（路由 `meta.titleKey`，页内不再重复大标题）；业务页筛选/操作留在内容区工具条；会话页顶栏抛光（桌面页保持暗色功能面）；**favicon** `public/favicon.svg`（主）+ `.ico` / apple-touch PNG；登录与侧栏品牌点同源 SVG |
+| `[x]` | Console 视觉（冷静工程风） | 全局 `styles/{tokens,element-theme,base}.css`；主色 `#2F5D9F`、浅色底；字体 **IBM Plex Sans/Mono** 经 `@fontsource` **同源自托管**（无 Google Fonts CDN）；登录品牌首屏；Layout 侧栏图标+**顶栏显示当前页标题**（路由 `meta.titleKey`，页内不再重复大标题）；侧栏底部 **版本号**（`package.json` → `v0.1.0`）+ **源码链接**（`https://gitee.com/cdisk/woops`）；业务页筛选/操作留在内容区工具条；会话页顶栏抛光（桌面页保持暗色功能面）；**favicon** `public/favicon.svg`（主）+ `.ico` / apple-touch PNG；登录与侧栏品牌点同源 SVG |
 | `[x]` | 共享资产树选择器 | `shared/AssetTreeSelect.vue` + `assetTree.js`：分组树 + 可选资产节点；**可搜索**（名称/主机名/公网·内网 IP）；分组不可选；端口映射创建与控制/操作/资产事件审计筛选共用 |
 
 ---

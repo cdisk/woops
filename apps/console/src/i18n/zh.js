@@ -60,7 +60,9 @@ export default {
     alerts: '监控预警',
     users: '用户',
     audit: '审计',
-    logout: '退出'
+    logout: '退出',
+    version: '版本',
+    repository: '源码仓库'
   },
 
   roles: {

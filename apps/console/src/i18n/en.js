@@ -60,7 +60,9 @@ export default {
     alerts: 'Alert rules',
     users: 'Users',
     audit: 'Audit',
-    logout: 'Log out'
+    logout: 'Log out',
+    version: 'Version',
+    repository: 'Source repository'
   },
 
   roles: {
