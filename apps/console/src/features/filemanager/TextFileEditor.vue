@@ -30,6 +30,11 @@
               :value="opt.value"
             />
           </el-select>
+          <el-button
+            :disabled="loading || saving"
+            :title="t('files.searchHint')"
+            @click="openSearch"
+          >{{ t('files.search') }}</el-button>
           <el-button :disabled="loading || saving" @click="close">{{ t('common.cancel') }}</el-button>
           <el-button type="primary" :loading="saving" :disabled="loading || !dirty" @click="save">
             {{ t('files.saveAndUpload') }}
@@ -47,6 +52,7 @@ import { ElMessageBox } from 'element-plus'
 import { EditorState } from '@codemirror/state'
 import { EditorView, keymap, lineNumbers, highlightActiveLine, drawSelection } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
+import { search, searchKeymap, highlightSelectionMatches, openSearchPanel } from '@codemirror/search'
 import { StreamLanguage, syntaxHighlighting, defaultHighlightStyle, bracketMatching } from '@codemirror/language'
 import { shell } from '@codemirror/legacy-modes/mode/shell'
 import { CHARSET_OPTIONS, charsetLabel } from '../filetransfer/charset'
@@ -131,7 +137,9 @@ function mountEditor(text) {
       drawSelection(),
       history(),
       bracketMatching(),
-      keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap]),
+      search({ top: true }),
+      highlightSelectionMatches(),
+      keymap.of([indentWithTab, ...searchKeymap, ...defaultKeymap, ...historyKeymap]),
       ...languageExt(),
       EditorView.updateListener.of((u) => {
         if (u.docChanged) dirty.value = u.state.doc.toString() !== baseline
@@ -157,6 +165,10 @@ async function onVisible(v) {
 
 function close() {
   emit('update:modelValue', false)
+}
+
+function openSearch() {
+  if (view) openSearchPanel(view)
 }
 
 function save() {

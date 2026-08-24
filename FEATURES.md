@@ -4,7 +4,7 @@
 > 任何功能新增、完成、搁置、行为变更，都必须先读本文件，并在同一变更中更新对应条目的状态与说明。  
 > README 只保留快速启动。历史设计稿 `bastion_architecture_design_*.plan.md` 不必再读。
 
-**最后更新：** 2026-08-21（README 强调 Agent 自带受限 proxy）
+**最后更新：** 2026-08-24（文件编辑器搜索）
 
 ---
 
@@ -168,7 +168,7 @@
 | `[x]` | Console 文件管理页 | 资源管理器布局；目录操作用 `/ws/file-manager`；上传/下载/文本编辑各自开 `filetransfer`；上传自动重连续传、失败暂停可继续；刷新后须重选原文件（指纹校验）；下载优先 File System Access 流式写盘，否则 ≤64MiB Blob；**连接/列目录/树懒加载/下载共用同一 SessionConnectingMask**（连接：「正在连接文件服务器」；列目录：「正在加载目录」；下载两行：「正在下载 文件名」+「已传/总量（%）」） |
 | `[x]` | 上传进度/速度统计 | `rateMeter.js` 5s 滑动窗口算**瞬时**速度（每 500ms 采样，停滞自动衰减到 0）；续传的远端 offset 只作基线不计入速度（`phase:'start'`）；整体速度只统计本次会话实际推送的字节；单文件与整体均显示「已传/总大小」与按瞬时速度推算的剩余时间；完成行显示本次均速 |
 | `[x]` | Console 文件模块拆分 | `features/filemanager/FileManagerPage.vue` 只管连接/列目录/树/重命名删除与接线；目录 RPC、路径、列表格式与编辑 UI（`FileEditDialog.vue`/`TextFileEditor.vue`）在同 feature；内容传输位于 `features/filetransfer/`：`transferClient.js`、上传队列、下载、任务 dialog、文本/编码/速率 helper；依赖方向仅 filemanager → filetransfer |
-| `[x]` | 文本在线编辑 | CodeMirror 6；短生命周期 filetransfer 读/写；≤2MiB；二进制拒绝 |
+| `[x]` | 文本在线编辑 | CodeMirror 6；短生命周期 filetransfer 读/写；≤2MiB；二进制拒绝；**编辑器内搜索**（`@codemirror/search` 面板，Ctrl+F / F3，底栏「搜索」按钮） |
 | `[x]` | 编辑编码自动识别 | `charset.js`：BOM → 严格 UTF-8 → `gb18030`/`big5`/`shift_jis` → Latin-1；**按原编码写回**（BOM 保留），非 UTF-8 的反向编码表由对应 `TextDecoder` 惰性推导（无新依赖）；无法表示的字符提示改存 UTF-8；编辑器底部可手动改编码并就地重新解码（原始字节缓存，不重新下载） |
 | `[~]` | 路径沙箱 + 操作审计 | filemanager：`filesniff` 记 LIST/STAT/MKDIR/REMOVE/RENAME；filetransfer：TRANSFER_* / WRITE/READ 聚合。**缺**路径沙箱（Agent 常以 root/SYSTEM 跑，见 §9） |
 

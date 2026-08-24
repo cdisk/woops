@@ -710,6 +710,8 @@ export default {
     dirty: '已修改',
     clean: '未修改',
     saveAndUpload: '保存并上传',
+    search: '搜索',
+    searchHint: 'Ctrl+F / F3',
     switchCharsetMsg: '切换编码会按新编码重新载入文件，未保存的修改将丢失，是否继续？',
     switchCharsetTitle: '切换编码',
     reload: '重新载入',

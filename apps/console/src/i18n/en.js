@@ -728,6 +728,8 @@ export default {
     dirty: 'Modified',
     clean: 'Unmodified',
     saveAndUpload: 'Save & upload',
+    search: 'Search',
+    searchHint: 'Ctrl+F / F3',
     switchCharsetMsg:
       'Switching encoding reloads the file; unsaved changes will be lost. Continue?',
     switchCharsetTitle: 'Switch encoding',
