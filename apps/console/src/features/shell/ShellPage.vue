@@ -54,7 +54,7 @@ const closedDialogVisible = ref(false)
 let term, fit, ws, resizeObserver
 let intentionalClose = false
 
-const KIND_LABEL = { bash: 'Shell', powershell: 'PowerShell' }
+const KIND_LABEL = { bash: 'Shell', powershell: 'PowerShell', cmd: 'CMD' }
 
 const kindLabel = computed(() => {
   const k = resolveKind()
@@ -77,7 +77,7 @@ const statusTagType = computed(() => {
 
 function resolveKind() {
   const k = String(route.query.kind || 'bash').toLowerCase()
-  if (k === 'powershell' || k === 'bash') return k
+  if (k === 'powershell' || k === 'bash' || k === 'cmd') return k
   return 'bash'
 }
 
@@ -100,7 +100,7 @@ onMounted(async () => {
     fontFamily: 'Consolas, Menlo, monospace',
     fontSize: 14,
     theme: { background: '#0b1020' },
-    // Match ConPTY scroll/repaint heuristics when talking to Windows PowerShell.
+    // ConPTY xterm backend only for modern Windows PowerShell; WinPTY/cmd must not use it.
     ...(kind === 'powershell' ? { windowsPty: { backend: 'conpty' } } : {})
   })
   fit = new FitAddon()

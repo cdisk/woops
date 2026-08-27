@@ -153,3 +153,63 @@ func TestRenderWindows(t *testing.T) {
 		t.Fatal("install.ps1 must not use throw here-strings (PS 5.1 ANSI decode breaks UTF-8)")
 	}
 }
+
+func TestRenderWindowsBat(t *testing.T) {
+	hex := "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+	out, err := Render("install.bat", Params{
+		GatewayBase:       "https://gw.example",
+		InstallCode:       "CODE123",
+		TLSSpkiSHA256:     hex,
+		AgentSHA256ByArch: map[string]string{"amd64": "deadbeef"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "{{") {
+		t.Fatal("placeholders not replaced")
+	}
+	if !strings.Contains(out, `set "GATEWAY=https://gw.example"`) {
+		t.Fatal("missing GATEWAY")
+	}
+	if !strings.Contains(out, `set "INSTALL_CODE=CODE123"`) {
+		t.Fatal("missing INSTALL_CODE")
+	}
+	if !strings.Contains(out, "sha256//") {
+		t.Fatal("missing CURL_PIN")
+	}
+	if !strings.Contains(out, "winpty.dll") {
+		t.Fatal("expected winpty download for legacy OS")
+	}
+	if !strings.Contains(out, `set "TEMP_DIR=%CONF_DIR%\install-temp"`) {
+		t.Fatal("legacy service update must not depend on a LocalSystem TEMP directory")
+	}
+	if !strings.Contains(out, `set "BIN_NEW=%BIN_DIR%\woops-agent-new.exe"`) ||
+		!strings.Contains(out, `restart-update.bat`) {
+		t.Fatal("install.bat must stage a detached live update")
+	}
+	if !strings.Contains(out, `echo gateway: "%GATEWAY%"`) ||
+		strings.Contains(out, `findstr /V /C:"gateway:"`) {
+		t.Fatal("install.bat must rewrite agent.yaml in ASCII without merging UTF-8 content")
+	}
+	if !strings.Contains(out, `set /p "EXISTING_ID="<"%ID_FILE%"`) {
+		t.Fatal("reinstall must reliably read and reuse the persisted asset-id")
+	}
+	if strings.Contains(out, `EXISTING_ID:~36`) {
+		t.Fatal("installer must not silently discard an existing identity using fragile length checks")
+	}
+	if !strings.Contains(out, `echo [ERROR] Service start failed`) {
+		t.Fatal("manual install must report service start failures")
+	}
+	if strings.Contains(out, "powershell") {
+		t.Fatal("install.bat must be pure cmd")
+	}
+	if !strings.Contains(out, "\r\n") {
+		t.Fatal("install.bat must use CRLF line endings for legacy cmd")
+	}
+	if strings.Contains(out, `echo:!AGENT_TOKEN!"`) {
+		t.Fatal("install.bat must not append a quote to agent-token")
+	}
+	if !strings.Contains(out, `echo:!AGENT_TOKEN!`) {
+		t.Fatal("install.bat must persist agent-token")
+	}
+}

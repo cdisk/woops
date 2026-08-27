@@ -27,30 +27,63 @@ func powershellPath() string {
 	return filepath.Join(systemRoot(), "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
 }
 
+func cmdPath() string {
+	return filepath.Join(systemRoot(), "System32", "cmd.exe")
+}
+
 // UTF-8 for xterm: set console encodings + chcp 65001 at session start.
 const psUTF8Init = `[Console]::InputEncoding=[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); chcp 65001 | Out-Null`
 
-func start(kind string, cols, rows int) (Session, error) {
+// effectiveShellKind maps powershell to cmd when ConPTY is unavailable (Win7 / Server 2012).
+func effectiveShellKind(requested string) string {
+	kind := strings.TrimSpace(strings.ToLower(requested))
+	if kind == "" {
+		kind = "powershell"
+	}
+	if !conpty.IsConPtyAvailable() && (kind == "powershell" || kind == "cmd") {
+		return "cmd"
+	}
+	return kind
+}
+
+func buildWindowsCmdLine(kind, home string) (cmdline string, logKind string) {
 	switch kind {
-	case "powershell", "":
-		// ok
 	case "cmd":
-		return nil, fmt.Errorf("cmd is not supported; use powershell (run cmd.exe inside if needed)")
+		// WorkDir/home is applied via ConPTY/WinPTY options; keep cmdline minimal for WinPTY.
+		return cmdPath() + ` /K chcp 65001 >nul`, "cmd"
+	case "powershell", "":
+		homeInit := psUTF8Init
+		if home != "" {
+			homeInit += `; Set-Location -LiteralPath '` + strings.ReplaceAll(home, "'", "''") + `'`
+		}
+		return powershellPath() + ` -NoLogo -NoProfile -NoExit -Command "` + homeInit + `"`, "powershell"
+	default:
+		return "", kind
+	}
+}
+
+func start(kind string, cols, rows int) (Session, error) {
+	rawKind := kind
+	kind = effectiveShellKind(kind)
+	switch kind {
+	case "powershell", "cmd":
+		// ok
 	case "bash":
 		return nil, fmt.Errorf("bash is only available on Linux/macOS")
 	default:
 		return nil, fmt.Errorf("unsupported shell kind: %s", kind)
 	}
+	if rawKind == "powershell" && kind == "cmd" {
+		log.Printf("shell: ConPTY unavailable; falling back powershell -> cmd")
+	}
 
 	home := defaultShellHome()
-	homeInit := psUTF8Init
-	if home != "" {
-		homeInit += `; Set-Location -LiteralPath '` + strings.ReplaceAll(home, "'", "''") + `'`
+	cmdline, logKind := buildWindowsCmdLine(kind, home)
+	if cmdline == "" {
+		return nil, fmt.Errorf("unsupported shell kind: %s", kind)
 	}
-	cmdline := powershellPath() + ` -NoLogo -NoProfile -NoExit -Command "` + homeInit + `"`
 	env := envWithHome(os.Environ(), home)
 
-	// Prefer ConPTY (Win10 1809+ / Server 2019+). Fall back to WinPTY on older OS only.
 	if conpty.IsConPtyAvailable() {
 		opts := []conpty.ConPtyOption{conpty.ConPtyDimensions(cols, rows), conpty.ConPtyEnv(env)}
 		if home != "" {
@@ -60,12 +93,12 @@ func start(kind string, cols, rows int) (Session, error) {
 		if err != nil {
 			return nil, fmt.Errorf("ConPTY start failed: %w", err)
 		}
-		log.Printf("shell: ConPTY started kind=powershell utf8 size=%dx%d dir=%s", cols, rows, home)
+		log.Printf("shell: ConPTY started kind=%s utf8 size=%dx%d dir=%s", logKind, cols, rows, home)
 		return &conptySession{c: c}, nil
 	}
 
-	log.Printf("shell: ConPTY unavailable; using WinPTY for powershell")
-	return startWinPTY(cmdline, home, env, cols, rows)
+	log.Printf("shell: ConPTY unavailable; using WinPTY for %s", logKind)
+	return startWinPTY(cmdline, home, env, cols, rows, logKind)
 }
 
 type conptySession struct {
@@ -100,7 +133,7 @@ func winptyRuntimeDir() (string, error) {
 	return dir, nil
 }
 
-func startWinPTY(cmdline, home string, env []string, cols, rows int) (Session, error) {
+func startWinPTY(cmdline, home string, env []string, cols, rows int, logKind string) (Session, error) {
 	dllDir, err := winptyRuntimeDir()
 	if err != nil {
 		return nil, err
@@ -120,7 +153,7 @@ func startWinPTY(cmdline, home string, env []string, cols, rows int) (Session, e
 	if err != nil {
 		return nil, fmt.Errorf("WinPTY start failed: %w", err)
 	}
-	log.Printf("shell: WinPTY started kind=powershell utf8 size=%dx%d dir=%s", cols, rows, workDir)
+	log.Printf("shell: WinPTY started kind=%s utf8 size=%dx%d dir=%s", logKind, cols, rows, workDir)
 	return &winptySession{wp: wp}, nil
 }
 

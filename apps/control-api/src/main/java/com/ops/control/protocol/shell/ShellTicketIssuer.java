@@ -14,7 +14,7 @@ import java.util.UUID;
 public class ShellTicketIssuer implements ProtocolTicketIssuer {
     @Override
     public Set<String> requestProtocols() {
-        return Set.of("shell_bash", "shell_powershell");
+        return Set.of("shell_bash", "shell_powershell", "shell_cmd");
     }
 
     @Override

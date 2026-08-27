@@ -168,7 +168,7 @@ import {
   CONTROL_AUDIT_PATH,
   OPERATIONS_AUDIT_PATH
 } from '../../features/audit/routes'
-import { isWindows as assetIsWindows } from '../../session/assetOs'
+import { isLegacyWindows, isWindows as assetIsWindows } from '../../session/assetOs'
 
 const props = defineProps({
   assetId: { type: String, required: true }
@@ -218,6 +218,7 @@ const form = reactive({
 })
 
 const isWindows = computed(() => assetIsWindows(asset.value))
+const isLegacyWin = computed(() => isLegacyWindows(asset.value))
 
 const groupSelectData = computed(() => mapGroups(groupTree.value))
 
@@ -572,7 +573,9 @@ async function oneClickUpdate() {
   execRunning.value = true
   try {
     const { data: prep } = await api.post(`/assets/${props.assetId}/agent-update`)
-    const command = isWindows.value ? (prep.powershell || '') : (prep.curl || '')
+    const command = isWindows.value
+      ? (isLegacyWin.value ? (prep.cmd || prep.powershell || '') : (prep.powershell || ''))
+      : (prep.curl || '')
     if (!command) {
       throw new Error(t('assets.noInstallCmd'))
     }

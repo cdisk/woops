@@ -9,6 +9,7 @@
 !go/third_party/winpty/x64/winpty-agent.exe
 go/vendor/
 **/tmp/
+tmp-legacy/
 *.err
 *.out
 /ops-install.ps1

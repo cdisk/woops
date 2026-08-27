@@ -4,7 +4,7 @@
 > 任何功能新增、完成、搁置、行为变更，都必须先读本文件，并在同一变更中更新对应条目的状态与说明。  
 > README 只保留快速启动。历史设计稿 `bastion_architecture_design_*.plan.md` 不必再读。
 
-**最后更新：** 2026-08-24（文件编辑器搜索）
+**最后更新：** 2026-08-27（Windows 安装命令本地文件名统一为 install.bat / install.ps1）
 
 ---
 
@@ -57,7 +57,7 @@
 | `[!]` | 迁走后的旧文件未删 | **Console：** 路由已走 `features/`，`modules/` 实际只用 `assets`/`auth`/`users`；`modules/{sessions,monitor,portmaps,ops-audit,audit,asset-events}` 仍在仓库、无引用，待删。**Go：** `cmd/gateway` 已走 `gateway/app`；旧顶层 `server.go`/`desktop.go`/`bridge.go`、`gateway/{audit,opsaudit,installscripts,portmap}` 仍在仓库，待删 |
 | `[x]` | Go 架构边界与静态可移除性审计 | `go/internal/architecture` 从实时文件系统解析 Go imports（不读取 Git index），强制 core 依赖方向与功能横向隔离；审计分类：`core`=中立运行时，`sessions`=会话数据面，`services`=常驻业务服务，`plugins`=可选后台/端点，`infra`=跨切面技术设施，`app`=组合根。功能由独立 `app/register_*.go` 静态注册；删除/替换对应注册文件即从二进制组合中移除，无需修改 `core`/`app.go`。CI overlay 已证明 shell（Agent+Gateway）、desktop（Gateway）、portmap（Agent+Gateway）、monitor（Agent+Gateway）移除后相关 cmd 仍可构建 |
 | `[~]` | 协议兼容测试 / 集成测试 | `internal/protocol/control` open_session nested-params golden 已有；Agent→Gateway→echo / Testcontainers 仍缺 |
-| `[x]` | 运行时 | 控制面 **Java 21** + Spring Boot 3；Go 1.22+；Vue 3 + Element Plus；图标 `@tabler/icons-vue` |
+| `[x]` | 运行时 | 控制面 **Java 21** + Spring Boot 3；Go **`go 1.20`**（模块最低版本；日常可用 Go 1.22+ 编译；legacy Agent 须 **`GOTOOLCHAIN=go1.20.14`**）；Vue 3 + Element Plus；图标 `@tabler/icons-vue` |
 | `[x]` | Console 中英 i18n | `vue-i18n`（`legacy:false`）；仅 `en`/`zh`；**默认英文**，`navigator.language` 以 `zh` 开头则中文；目录 `apps/console/src/i18n/{en,zh,index}.js`；`App.vue` 用 `el-config-provider` 同步 Element Plus locale；SFC `useI18n()`，纯 JS `import { t } from '…/i18n'`；控制台可见文案已迁入目录（含 Layout/Login/资产/用户/审计/会话/文件/桌面/端口映射/监控等） |
 | `[x]` | Console 视觉（冷静工程风） | 全局 `styles/{tokens,element-theme,base}.css`；主色 `#2F5D9F`、浅色底；字体 **IBM Plex Sans/Mono** 经 `@fontsource` **同源自托管**（无 Google Fonts CDN）；登录品牌首屏；Layout 侧栏图标+**顶栏显示当前页标题**（路由 `meta.titleKey`，页内不再重复大标题）；侧栏底部 **版本号**（`package.json` → `v0.1.0`）+ **源码链接**（`https://gitee.com/cdisk/woops`）；业务页筛选/操作留在内容区工具条；会话页顶栏抛光（桌面页保持暗色功能面）；**favicon** `public/favicon.svg`（主）+ `.ico` / apple-touch PNG；登录与侧栏品牌点同源 SVG |
 | `[x]` | 共享资产树选择器 | `shared/AssetTreeSelect.vue` + `assetTree.js`：分组树 + 可选资产节点；**可搜索**（名称/主机名/公网·内网 IP）；分组不可选；端口映射创建与控制/操作/资产事件审计筛选共用 |
@@ -104,15 +104,16 @@
 
 | 状态 | 功能 | 说明 |
 |------|------|------|
-| `[x]` | 安装码 15min / 不限次数 / 可吊销 | 控制台用左侧当前选中分组一键生成（选「全部」则提示先选组）；API 必填 `groupId`；首装与重装均写入/迁移到该分组；命令弹窗注明目标分组并**按 `expiresAt` 倒计时**（到期显示已过期）；无 group 的旧码视为无效 |
+| `[x]` | 安装码 15min / 不限次数 / 可吊销 | 16 位 hex（8 字节）；控制台用左侧当前选中分组一键生成（选「全部」则提示先选组）；API 必填 `groupId`；首装与重装均写入/迁移到该分组；命令弹窗注明目标分组并**按 `expiresAt` 倒计时**（到期显示已过期）；无 group 的旧码视为无效 |
 | `[x]` | `GET /i/{code}/install.sh` | Linux：`curl … \| bash`；源文件 `go/internal/gateway/services/agentinstall/install.sh`（embed） |
-| `[x]` | `GET /i/{code}/install.ps1` | Windows：一键 `$f=Join-Path $env:TEMP woops-install.ps1; curl.exe -o $f …; powershell -File $f`（**禁止** `$env:TEMP\file` 裸拼接，PowerShell 会解析失败；有 pin：`-k --pinnedpubkey`；**禁止** `curl\|iex` / `iex(Out-String)`）；控制台旁注无 curl 时的折叠安装提示；落盘 `%ProgramData%\woops-agent\`；源文件 `gateway/services/agentinstall/install.ps1` |
-| `[x]` | `GET /i/{code}/agent/{os}/{arch}` | 产物名 `woops-agent-{os}-{arch}`（`.exe`/`.gz`）；`-ldflags=-s -w -X main.Version=…`；可选旁路 `.gz`，安装脚本 `?format=gz` 优先（约 10MB→3MB 下载）；**Docker Gateway** 同步编 `linux/amd64` + `windows/amd64`（曾只编 Linux，Windows 安装 404） |
+| `[x]` | `GET /i/{code}/install.ps1` | Windows（Win10+）：`curl.exe -o $env:TEMP\…; powershell -File`；有 pin：`-k --pinnedpubkey`；源文件 `gateway/services/agentinstall/install.ps1` |
+| `[x]` | `GET /i/{code}/install.bat` | Windows legacy（Win7 / Server 2012）：纯 cmd、**ASCII-only REM**、**CRLF**；**手工安装**下载 `%TEMP%\install.bat`；**一键更新**下载 `%ProgramData%\woops-agent\install.bat` 再 `cmd /c call`；`LIVE=1` 时暂存 `woops-agent-new.exe` 后 `restart-update.bat` 异步重启；`agent.yaml` **整文件重写**为 ASCII 最小配置（禁止 findstr 合并 UTF-8/BOM，否则 `yaml: line 3`）；`asset-id` 用 `set /p` 复用；build &lt; 17763 自动下 WinPTY |
+| `[x]` | `GET /i/{code}/agent/{os}/{arch}` | 产物名 `woops-agent-{os}-{arch}`（`.exe`/`.gz`）；`-ldflags=-s -w -X main.Version=…`；可选旁路 `.gz`，安装脚本 `?format=gz` 优先（约 10MB→3MB 下载）；**Docker Gateway** 同步编 `linux/amd64` + `windows/amd64`；gateway/Linux/woopsctl 用当前 Go，**Windows Agent 独立固定 Go 1.20.14**（Go 1.21+ 产物不能运行于 Win7 / Server 2012） |
 | `[x]` | `GET /bin/woopsctl/{os}/{arch}` | 公开下载（无需安装码）；产物 `woopsctl-{os}-{arch}`（Windows `.exe`）；**Docker Gateway** 同编 `linux/amd64` + `windows/amd64`；Console 部署 Token 旁下拉；nginx/Vite 同源 `/bin/` 反代 Gateway |
-| `[x]` | install 脚本行为 | 先下载再注册；保留 `asset-id`；上报 `agentVersion`；**在线更新**：`LIVE=1`（一键更新/Web Shell）**始终**延迟 stop→start（安装进程内不停活 agent）；优先 `systemd-run --no-block` 调度 `restart-update.sh`（脱离 exec 会话，避免会话结束清掉 setsid 子进程），否则回退 `setsid`/`nohup`；停旧启新仅在 `restart-update.*` / 冷装 `start_agent`；仅当最终路径上的 `woops-agent` 正在运行时才暂存 `*-new`（避免 ETXTBSY）；杀进程只用 `pkill -x woops-agent`（禁用 `pkill -f`）；**Linux**：优先 `/usr/local/bin/woops-agent`，仅下载失败或 live 无法写该路径时才建 `/opt/woops-agent/`；**Windows**：注册服务 `woops-agent`；首装写入 `gateway`+`gatewayTlsSpkiSha256`；**仅 `GATEWAY_BASE`**；下载/注册按 pin；Gateway 嵌入 agent SHA-256；**依赖预检** curl/xxd/sha256sum；gzip 可选；**主机名/内网 IP** 不强制 `hostname(1)`。**已移除** `ops-agent` 迁移/回退 |
+| `[x]` | install 脚本行为 | 先下载再注册；保留 `asset-id`；上报 `agentVersion`；**在线更新**：`LIVE=1`（一键更新/Web Shell）**始终**延迟 stop→start（安装进程内不停活 agent）；优先 `systemd-run --no-block` 调度 `restart-update.sh`（脱离 exec 会话，避免会话结束清掉 setsid 子进程），否则回退 `setsid`/`nohup`；Windows legacy CMD 同样先暂存 `woops-agent-new.exe`/`winpty-new.*`，再由独立 `restart-update.bat` 停服务、替换并启动；停旧启新仅在 `restart-update.*` / 冷装 `start_agent`；仅当最终路径上的 `woops-agent` 正在运行时才暂存 `*-new`（避免 ETXTBSY）；杀进程只用 `pkill -x woops-agent`（禁用 `pkill -f`）；**Linux**：优先 `/usr/local/bin/woops-agent`，仅下载失败或 live 无法写该路径时才建 `/opt/woops-agent/`；**Windows**：注册服务 `woops-agent`；首装写入 `gateway`+`gatewayTlsSpkiSha256`；首装后更新保留既有 `agent.yaml`；旧 PowerShell 读取代理配置使用 `.NET ReadAllText`（不依赖 PS3 `Get-Content -Raw`）；**仅 `GATEWAY_BASE`**；下载/注册按 pin；Gateway 嵌入 agent SHA-256；**依赖预检** curl/xxd/sha256sum；gzip 可选；**主机名/内网 IP** 不强制 `hostname(1)`。**已移除** `ops-agent` 迁移/回退 |
 | `[x]` | Agent HTTPS 注册 | 响应 `assetId`/`agentToken`/`reused`；可选 `assetId` 复用并轮换 token，同时按安装码 `groupId` 迁移分组；上报 `os` 详细版本 + `agentVersion`；**公网只打 Gateway**：`POST /api/agent/register` 由 Gateway 反代到私网 control-api |
 | `[x]` | Agent 验 Gateway | control / session / metrics（含 portmap 隧道）共用 TLS dialer；有 pin 时校 SPKI；无 pin 走系统 CA；假 Gateway / 错 pin 在握手失败，不发 `agent-token`；可选 `gatewayProxy` 时经 HTTP CONNECT 出站（目标 DNS 由代理解析） |
-| `[x]` | Agent 构建版本 | `-ldflags -X main.Version=yymmddHHMM`（开发期）；`woops-agent -version`；本地 `go/scripts/build-agent-*.{ps1,sh}`；**Docker** `Dockerfile.gateway` 同步注入（曾漏写致安装产物恒为 `dev`） |
+| `[x]` | Agent 构建版本 | `-ldflags -X main.Version=yymmddHHMM`；`woops-agent -version`；**Windows** `go/scripts/build-agent-windows.ps1`（`GOTOOLCHAIN=go1.20.14`，Win7–Win11 通用）；Linux `build-agent-linux.sh`；Docker `Dockerfile.gateway` 同步注入 |
 | `[x]` | 控制 WSS | 在线（带 `sourceIp`）、ping、`open_session`、`netinfo`（**仅内网 IP**，不含公网、**不含** metrics）；`ctx` 取消时关闭 WS，避免 `ReadMessage` 卡满读超时（曾致 `systemctl stop` 约 60–90s）；Agent 对 Gateway Ping 用 `PingHandler` 续期 90s 读超时（仅 `PongHandler` 时曾约 90s 周期断连）；**重连前重读** `agent-token`/`asset-id`（一键更新 register 轮换 token 后，旧进程不致永久 `bad handshake`） |
 | `[x]` | 一会话一数据 WSS | TCP binary chunk ≈ io.Copy；**协议层 Ping/Pong keepalive**（Gateway 对 browser+agent 两侧每 25s Ping、90s 无 Pong/数据则读超时关闭并 `auditEnd`；与 Text/Binary 业务帧分离，无新信令）。Shell 的 Agent 侧同超时续期；filemanager/exec/filetransfer 仅靠 Gateway 探测（避免长写无读误杀） |
 | `[x]` | `protocol_version` / Envelope | `internal/protocol/control`；未知类型忽略；`open_session` **仅**嵌套 `params`（`ShellParams`/`FileTransferParams`/`TunnelParams`）；`netinfo` 仅 `privateIp` CSV；**已移除**平铺字段双写/回退与 `privateIps` 数组双发。golden：`internal/protocol/control/testdata/open_session/` |
@@ -127,7 +128,7 @@
 | `[x]` | 代理模式 + agent 模式同二进制 | 外网/内网1 开入站 `proxy.*`；更深内网装 Agent 时设 `https_proxy`→`gatewayProxy`（本机 WSS + 可选再开 `proxy.*` 给下一跳）；多级：C→B(proxy+gatewayProxy=A)→A(proxy)→Gateway；`proxy.enabled=true` 时自动写本地 `proxy.log`（见下行） |
 | `[x]` | Agent 本地文件日志 | `woops-agent.log`：启动/控制与 metrics 连断、会话 `op START/END/FAIL`；**不**记成功 netinfo / monitor 周期 sent。`proxy.enabled=true` 另开 `proxy.log`（请求 START/END/FAIL、耗时、字节；无凭据/header/body/query）。Linux `/var/log/woops-agent/`；Windows `%ProgramData%\woops-agent\`。lumberjack：50MiB 轮转、压缩、`MaxAge=90`（最长约 90 天）。同步 stderr/journald |
 | `[x]` | 安装命令带 proxy URL / 读环境变量写入配置 | 安装：`curl`/`curl.exe` 认 `https_proxy`/`http_proxy`/`ALL_PROXY`；脚本写入 `agent.yaml` `gatewayProxy`；控制台弹窗说明单引号与密码百分号编码 |
-| `[x]` | Windows 安装 | `$f=Join-Path $env:TEMP woops-install.ps1; curl.exe -o $f …; powershell -File $f`；无 curl 时控制台折叠提示；OS build &lt; 17763 下载 WinPTY（Gateway 镜像须含 `/app/bin/winpty/amd64/`）；注册 Windows Service `woops-agent`（DisplayName Woops Agent）；重装强制 `StartupType=Automatic`（`Set-Service`）；更新二进制路径写注册表 `ImagePath`（不用 `sc config binPath`，避免 Program Files 空格导致 exit 1639）；**须管理员**；`install.ps1` 下发带 UTF-8 BOM，权限提示用 ASCII `throw`（避免 PS 5.1 无 BOM 按系统 ANSI 误解析中文 here-string） |
+| `[x]` | Windows 安装 | Win10+：`install.ps1`（PowerShell）；Win7/2012：`install.bat`（cmd，见上行）；OS build &lt; 17763 下载 WinPTY；注册 Service `woops-agent`；**须管理员** |
 | `[!]` | Linux Agent 交叉编译 | 勿用本机 `GOOS=linux`（曾 segfault）；用 Linux 容器 `go build` |
 
 ---
@@ -151,7 +152,7 @@
 | `[x]` | Shell 常用命令（按资产） | 顶栏右「常用命令」：`ShellCommands.vue`；`assets.shell_commands` jsonb `List<String>`；`GET/PUT /api/assets/{id}/shell-commands`（可见即可）；点击整段粘贴并回车执行；管理弹窗增删改；审计只记条数不落正文 |
 | `[x]` | Agent 原生 Linux Shell（PTY） | `agent/sessions/shell` + `creack/pty`；`LookPath(bash)`→`LookPath(sh)`，再回退 `/bin|/usr/bin` 固定路径（防 systemd PATH 过窄）；`-l` 启动；显式 `SHELL`/`TERM=xterm-256color`/`COLORTERM=truecolor`（避免 `dircolors: no SHELL…`）；启动目录见下行；尺寸在会话内 `R,cols,rows` 热更新（不必像 Windows 那样先等） |
 | `[x]` | Agent 原生 Shell 启动目录 | Linux：`cmd.Dir` + 强制 `HOME`/`PWD` 为用户 home；systemd unit 使用 `WorkingDirectory=/`（勿用 conf 目录作 cwd）；Windows：ConPTY `ConPtyWorkDir` + WinPTY `Dir` 用用户目录；LocalSystem 时优先 `C:\Users\Administrator`，否则扫描 `C:\Users\*`（排除 Public/Default），**禁止**回退 `…\systemprofile`（无可用配置则 Public 或盘符根）；另设 `USERPROFILE`/`HOME` 并 `Set-Location` 兜底 |
-| `[~]` | Agent 原生 Windows PowerShell | ConPTY（≥17763）优先；否则 WinPTY（`third_party/winpty` + install 条件下载）；仅 PS + UTF-8；启动目录同上；**会话先等浏览器 `R,cols,rows` 再按实尺寸建 PTY**（晚 Resize 不可靠，曾致 `\x1b[H` 重绘覆盖旧输出）；Console PowerShell 开 xterm `windowsPty: conpty` 并重发尺寸；待 2016 实机复验按键 |
+| `[~]` | Agent 原生 Windows Shell | ConPTY（≥17763）优先 **PowerShell**；无 ConPTY（Win7 / Server 2012）**WinPTY + cmd**（Agent 自动将 powershell 回退为 cmd；控制台 legacy 资产开 `shell_cmd`、xterm 不用 `windowsPty: conpty`）；UTF-8 `chcp 65001`；启动目录同上；**会话先等浏览器 `R,cols,rows` 再建 PTY** |
 | `[x]` | Gateway `/ws/shell` + `shell_*` 票据 | Java `type=shell`+`shellKind`（无密码）；shell 模块解码 Claims/构造 Params/录像 hooks，通用 `BridgeSpec` 透传 + 两侧 keepalive；半开断连可收尾审计 |
 | `[x]` | 终端按键 | xterm 原样透传；浏览器原生 `Ctrl+W`/`Ctrl+T` 无法可靠拦截，Shell 顶栏提供按钮向终端发送对应控制字符；Windows 终端依赖 ConPTY/WinPTY |
 | `[x]` | 已移除经 sshd 的 Web SSH | 无 `/ws/ssh`、无 `ssh` 票据、无 legacy `/sessions/:id`；终端仅 Agent 原生 Shell |

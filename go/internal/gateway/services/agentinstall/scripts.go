@@ -3,10 +3,11 @@ package agentinstall
 import (
 	"embed"
 	"encoding/base64"
+	"encoding/hex"
 	"strings"
 )
 
-//go:embed install.sh install.ps1 agent.yaml.tmpl
+//go:embed install.sh install.ps1 install.bat agent.yaml.tmpl
 var files embed.FS
 
 // Params fills install script placeholders.
@@ -17,6 +18,21 @@ type Params struct {
 	TLSSpkiSHA256 string
 	// AgentSHA256ByArch maps arch -> hex sha256 of woops-agent binary (optional).
 	AgentSHA256ByArch map[string]string
+}
+
+func curlPinFromHex(hexPin string) string {
+	hexPin = strings.TrimSpace(hexPin)
+	if hexPin == "" {
+		return ""
+	}
+	hexPin = strings.TrimPrefix(strings.TrimPrefix(hexPin, "sha256//"), "sha256:")
+	hexPin = strings.ReplaceAll(hexPin, ":", "")
+	hexPin = strings.ReplaceAll(hexPin, " ", "")
+	b, err := hex.DecodeString(hexPin)
+	if err != nil || len(b) == 0 {
+		return ""
+	}
+	return "sha256//" + base64.StdEncoding.EncodeToString(b)
 }
 
 // Render returns an install script with gateway/install-code placeholders filled.
@@ -51,8 +67,15 @@ func Render(name string, p Params) (string, error) {
 		"{{GATEWAY_BASE}}", p.GatewayBase,
 		"{{INSTALL_CODE}}", p.InstallCode,
 		"{{GATEWAY_TLS_SPKI_SHA256}}", p.TLSSpkiSHA256,
+		"{{CURL_PIN}}", curlPinFromHex(p.TLSSpkiSHA256),
 		"{{AGENT_SHA256_AMD64}}", amd,
 		"{{AGENT_SHA256_ARM64}}", arm,
 	)
-	return r.Replace(src), nil
+	out := r.Replace(src)
+	if name == "install.bat" {
+		// Legacy cmd on Win7/2012 requires CRLF; LF-only bat breaks parsing (setlocal -> 'tlocal').
+		out = strings.ReplaceAll(out, "\r\n", "\n")
+		out = strings.ReplaceAll(out, "\n", "\r\n")
+	}
+	return out, nil
 }

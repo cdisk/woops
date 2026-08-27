@@ -22,7 +22,7 @@ public final class AssetAccess {
     public static boolean allows(AssetEntity asset, String protocol) {
         if (protocol == null || protocol.isBlank()) return false;
         return switch (protocol.toLowerCase()) {
-            case "shell_powershell", "rdp" -> isWindows(asset.getOs());
+            case "shell_powershell", "shell_cmd", "rdp" -> isWindows(asset.getOs());
             case "shell_bash", "vnc" -> !isWindows(asset.getOs());
             case "filemanager", "exec", "filetransfer" -> true;
             default -> false;

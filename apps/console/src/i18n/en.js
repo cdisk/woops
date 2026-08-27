@@ -156,6 +156,7 @@ export default {
     detailTitle: 'Details',
     settingsTitle: 'Asset settings',
     installCommands: 'Install commands',
+    installWindowsCmd: 'Windows (CMD / Win7·Server 2012)',
     registerHint: 'The host will register/update into group “{group}”.',
     installExpired: 'Install code expired. Close and generate again.',
     installRemain: '{remain} remaining; regenerate after expiry.',
@@ -240,7 +241,12 @@ export default {
       'Requires curl.exe (usually built-in on Win10 1803+ / Server 2019+). If the command is missing, click for install tips.',
     curlInstallIntro: 'Install curl with one of these methods, then run the install command above:',
     curlInstallSteps:
-      '# 1) Installed but not on PATH (try this first)\n…\n# 2) winget (if available)\n…\n# 3) Download win64 zip from https://curl.se/windows/,\n#    unzip and add the bin folder with curl.exe to PATH, or:',
+      '# 1) winget (if available)\n' +
+      'winget install --id cURL.cURL -e --accept-package-agreements --accept-source-agreements\n' +
+      '\n' +
+      '# 2) Download win64 zip from https://curl.se/windows/,\n' +
+      '#    unzip and add the bin folder with curl.exe to PATH, or:\n' +
+      '#    $env:Path = "D:\\path\\to\\curl\\bin;$env:Path"',
     proxyToggle: 'Install via HTTP proxy (air-gap / intranet). Click for env vars and examples.',
     proxyBody1:
       'The install script does not accept custom proxy CLI flags; download/register use curl (curl.exe on Windows) and only system env vars:',

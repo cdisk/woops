@@ -97,7 +97,29 @@ copy .env.example .env
 
 ### 1) 前置
 
-JDK 21、Maven、Go 1.22+、Node 20+、Docker（Postgres / 可选 guacd）、OpenSSL（生成自签证书时用）。
+JDK 21、Maven、Node 20+、Docker（Postgres / 可选 guacd）、OpenSSL（生成自签证书时用）。
+
+**Go（按编译目标区分）：**
+
+| 目标 | 要求 |
+|------|------|
+| `gateway` / `woopsctl`（本机开发） | **Go 1.22+**（读 `go/go.mod`，当前模块声明 **`go 1.20`** 最低版本） |
+| **Windows Agent**（须兼容 Win7–Win11） | 用 [`go/scripts/build-agent-windows.ps1`](./go/scripts/build-agent-windows.ps1)，脚本固定 **`GOTOOLCHAIN=go1.20.14`**；不要单独 `go build` Agent 当发布包 |
+| **Linux Agent** | 用 [`go/scripts/build-agent-linux.sh`](./go/scripts/build-agent-linux.sh)，在 **Linux 本机或容器**里编；**勿在 Windows 上 `GOOS=linux` 交叉编译**（曾 segfault） |
+| Docker 全栈里的 Gateway 镜像 | [`deploy/Dockerfile.gateway`](./deploy/Dockerfile.gateway) 用 Go 1.26 编 gateway / Linux Agent / woopsctl，**另用 Go 1.20.14 编 Windows Agent**，保证下载到的 EXE 可运行于 Win7 / Server 2012 |
+
+### 1.4) Agent 支持的操作系统
+
+安装脚本与 Agent 二进制当前以 **amd64** 为主（Windows / Linux）；`install.ps1` / `install.sh` 亦预留 arm64 占位，Gateway 有对应产物时可装。
+
+| 平台 | 支持范围 | 安装方式 | Shell / 备注 |
+|------|----------|----------|----------------|
+| **Linux** | 常见 amd64 发行版（systemd 服务） | `install.sh`（`curl … \| bash`） | 原生 PTY Shell（bash/sh）；VNC 需目标机有桌面与 VNC 服务 |
+| **Windows 10 1809+ / Server 2019+** | 内部版本 **≥ 17763**（ConPTY） | `install.ps1`（管理员；`curl.exe` + `powershell -File`） | 默认 **PowerShell** Shell |
+| **Windows 7 / Server 2012 / Server 2016 等** | 内部版本 **&lt; 17763**（无 ConPTY） | `install.bat`（管理员；纯 **cmd**；控制台「CMD / Win7·Server 2012」） | **CMD + WinPTY**；目标机需自带 **curl.exe** |
+| **Windows 通用** | 上述各代 | 均需能 HTTPS 访问 Gateway（自签用 SPKI pin） | 注册 Windows 服务 `woops-agent`；配置在 `%ProgramData%\woops-agent\` |
+
+更细的行为（在线更新、WinPTY 下载、legacy 一键更新等）见 [`FEATURES.md`](./FEATURES.md) §4。
 
 ### 1.5) Gateway TLS 证书（克隆后需自己生成，编译不会自动出）
 
@@ -122,10 +144,15 @@ JDK 21、Maven、Go 1.22+、Node 20+、Docker（Postgres / 可选 guacd）、Ope
 
 ```powershell
 cd go
+# gateway / woopsctl：本机 Go 1.22+ 即可
 go build -trimpath -o bin\gateway.exe ./cmd/gateway
 go build -trimpath -o bin\woopsctl.exe ./cmd/woopsctl
+
+# Windows Agent：必须用脚本（Go 1.20.14 工具链，Win7–Win11 通用二进制）
 .\scripts\build-agent-windows.ps1
-# Linux Agent：见 go/scripts/build-agent-linux.sh（勿在 Windows 上交叉当生产包）
+
+# Linux Agent：在 Linux 或容器内执行 go/scripts/build-agent-linux.sh
+# 勿在 Windows 上 GOOS=linux 交叉编译当生产包
 
 cd ..\apps\control-api
 mvn -DskipTests package
@@ -134,6 +161,8 @@ cd ..\console
 npm install
 npm run build
 ```
+
+Linux 上编 gateway / woopsctl 时去掉 `.exe` 路径即可；Agent 仍建议用 `build-agent-linux.sh`。
 
 ### 3) 启动（本机进程 + Docker 只跑库）
 
@@ -176,9 +205,12 @@ npm run dev
 2. 打开控制台 → **资产** → 左侧先选中目标**分组**（选「全部」不能发码）→ **生成安装链接**。
 3. 在弹窗复制对应系统的命令，到目标机执行：
    - **Linux**：`curl … | bash`
-   - **Windows**：`curl.exe` 下载 `install.ps1` 再 `powershell -File …`（须管理员；弹窗有无 curl 时的折叠说明）
+   - **Windows（Win10 / Server 2019+）**：`curl.exe` 下载 `install.ps1` 再 `powershell -File …`（须管理员）
+   - **Windows（Win7 / Server 2012 等）**：第三条 **CMD** 命令，下载 `install.bat` 后执行（须管理员；须 **curl.exe**）
 4. 安装码约 **15 分钟**有效、期内可多次用；过期重新生成。脚本会下载 Agent、向 Gateway 注册，并落盘服务（Linux 优先 `/usr/local/bin/woops-agent`，Windows 服务名 `woops-agent`）。
 5. 控制台资产列表出现该主机且为「在线」即成功。重装会保留 `asset-id`、轮换 `agent-token`。
+
+支持的操作系统见 **§1.4**。
 
 网闸 / 多级内网：在能出网的机器上装 Agent，打开**自带受限**入站 `proxy.*` 作跳板；更深主机安装前设 `https_proxy` 指向该跳板（写入 `gatewayProxy`）。详见上文 **「网闸与多级内网（Agent 自带受限 proxy）」**；控制台安装弹窗也有变量示例。
 

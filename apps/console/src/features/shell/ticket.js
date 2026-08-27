@@ -2,7 +2,9 @@ import api from '../../shared/api'
 
 export function shellProtocol(kind) {
   const k = String(kind || 'bash').toLowerCase()
-  return k === 'powershell' ? 'shell_powershell' : 'shell_bash'
+  if (k === 'powershell') return 'shell_powershell'
+  if (k === 'cmd') return 'shell_cmd'
+  return 'shell_bash'
 }
 
 export async function requestShellTicket(assetId, kind) {

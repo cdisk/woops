@@ -43,14 +43,16 @@ func Handler(d Deps) http.HandlerFunc {
 		}
 
 		switch action {
-		case "install.sh", "install.ps1":
+		case "install.sh", "install.ps1", "install.bat":
 			if action == "install.sh" {
 				w.Header().Set("Content-Type", "text/x-shellscript")
+			} else if action == "install.bat" {
+				w.Header().Set("Content-Type", "application/bat")
 			} else {
 				w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 			}
 			osName := "linux"
-			if action == "install.ps1" {
+			if action == "install.ps1" || action == "install.bat" {
 				osName = "windows"
 			}
 			body, err := Render(action, installParams(d, publicGatewayBase(r, d.PublicHTTPBase), code, osName))

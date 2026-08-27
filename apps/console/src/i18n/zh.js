@@ -154,6 +154,7 @@ export default {
     detailTitle: '详情',
     settingsTitle: '资产设置',
     installCommands: '安装命令',
+    installWindowsCmd: 'Windows（CMD / Win7·Server 2012）',
     registerHint: '服务器将注册/更新到分组「{group}」。',
     installExpired: '安装码已过期，请关闭后重新生成。',
     installRemain: '有效期剩余 {remain}，过期后须重新生成。',
@@ -235,7 +236,12 @@ export default {
       '依赖 curl.exe（Win10 1803+ / Server 2019+ 一般自带）。若提示找不到命令，点此查看安装方法。',
     curlInstallIntro: '任选一种方式装好后再执行上方安装命令：',
     curlInstallSteps:
-      '# 1) 已装但 PATH 里没有时（先试这个）\n…\n# 2) winget（有的话）\n…\n# 3) 浏览器打开 https://curl.se/windows/ 下载 win64 zip，\n#    解压后把含 curl.exe 的 bin 目录加入 PATH，或：',
+      '# 1) winget（有的话）\n' +
+      'winget install --id cURL.cURL -e --accept-package-agreements --accept-source-agreements\n' +
+      '\n' +
+      '# 2) 浏览器打开 https://curl.se/windows/ 下载 win64 zip，\n' +
+      '#    解压后把含 curl.exe 的 bin 目录加入 PATH，或：\n' +
+      '#    $env:Path = "D:\\path\\to\\curl\\bin;$env:Path"',
     proxyToggle: '经 HTTP 代理安装（网闸 / 内网）。点此查看变量写法与示例。',
     proxyBody1: '安装脚本不识别命令行里的自定义代理参数；下载与注册走 curl（Windows 为 curl.exe），只认系统环境变量：',
     proxyVars:

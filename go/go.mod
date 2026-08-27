@@ -1,6 +1,6 @@
 module github.com/ops-bastion/ops/go
 
-go 1.22
+go 1.20
 
 require (
 	github.com/UserExistsError/conpty v0.1.4

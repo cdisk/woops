@@ -19,6 +19,9 @@ import java.util.*;
 
 @Service
 public class AgentService {
+    /** 16 hex chars; 15-min TTL makes collision negligible. */
+    private static final int INSTALL_CODE_BYTES = 8;
+
     private final InstallCodeRepository installCodes;
     private final AssetRepository assets;
     private final OpsProperties props;
@@ -95,7 +98,14 @@ public class AgentService {
                 ControlAuditService.jsonDetail(detail));
         Map<String, Object> out = new LinkedHashMap<>(minted.response());
         out.put("curl", withAgentProxyLinux(String.valueOf(out.get("curl"))));
-        out.put("powershell", withAgentProxyWindows(String.valueOf(out.get("powershell"))));
+        // Modern Windows one-click update: install.ps1 under ProgramData.
+        out.put("powershell", withAgentProxyWindows(buildWindowsUpdateCommand(
+                String.valueOf(out.get("installUrlWindows")),
+                props.gatewayTlsSpkiSha256Normalized())));
+        // Win7 / Server 2012 one-click update: install.bat under ProgramData (exec is PowerShell).
+        out.put("cmd", withAgentProxyWindows(buildWindowsLegacyUpdateCommand(
+                String.valueOf(out.get("installUrlWindowsLegacy")),
+                props.gatewayTlsSpkiSha256Normalized())));
         out.put("assetId", asset.getId().toString());
         out.put("fromAgentVersion", asset.getAgentVersion() == null ? "" : asset.getAgentVersion());
         return out;
@@ -129,7 +139,8 @@ public class AgentService {
         return "$c=$null; $p=Join-Path $env:ProgramData 'woops-agent\\agent.yaml'; "
                 + "if (Test-Path -LiteralPath $p) { $c=$p }; "
                 + "if ($c) { "
-                + "$m=[regex]::Match([string](Get-Content -Raw -LiteralPath $c), "
+                // ReadAllText works on PowerShell 2.0; Get-Content -Raw requires PowerShell 3.0.
+                + "$m=[regex]::Match([System.IO.File]::ReadAllText($c), "
                 + "'(?m)^\\s*gatewayProxy:\\s*(\\S+)\\s*$'); "
                 + "if ($m.Success) { $p=$m.Groups[1].Value.Trim([char]34).Trim([char]39); "
                 + "if ($p) { $env:HTTPS_PROXY=$p; $env:HTTP_PROXY=$p; $env:ALL_PROXY=$p; "
@@ -147,7 +158,7 @@ public class AgentService {
             throw new IllegalArgumentException("groupId required");
         }
         InstallCodeEntity entity = new InstallCodeEntity();
-        entity.setCode(randomToken(24));
+        entity.setCode(randomToken(INSTALL_CODE_BYTES));
         entity.setExpiresAt(Instant.now().plusSeconds(props.installCodeTtlMinutes() * 60L));
         entity.setCreatedBy(userId);
         entity.setGroupId(groupId);
@@ -157,6 +168,7 @@ public class AgentService {
         String base = endpoints.gatewayHttp() + "/i/" + entity.getCode();
         String linuxUrl = base + "/install.sh";
         String windowsUrl = base + "/install.ps1";
+        String legacyBatUrl = base + "/install.bat";
         String pin = props.gatewayTlsSpkiSha256Normalized();
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("code", entity.getCode());
@@ -165,11 +177,13 @@ public class AgentService {
         out.put("expiresAt", entity.getExpiresAt().toString());
         out.put("installUrl", linuxUrl);
         out.put("installUrlWindows", windowsUrl);
+        out.put("installUrlWindowsLegacy", legacyBatUrl);
         if (!pin.isBlank()) {
             out.put("gatewayTlsSpkiSha256", pin);
         }
         out.put("curl", buildLinuxInstallCurl(linuxUrl, pin));
         out.put("powershell", buildWindowsInstallCommand(windowsUrl, pin));
+        out.put("cmd", buildWindowsLegacyInstallCommand(legacyBatUrl, pin));
         return new MintedInstallCode(entity.getId(), entity.getExpiresAt(), out);
     }
 
@@ -459,6 +473,58 @@ public class AgentService {
         }
         return "$f=Join-Path $env:TEMP woops-install.ps1; " + curl
                 + "; powershell -NoProfile -ExecutionPolicy Bypass -File $f";
+    }
+
+    /**
+     * Win7 / Server 2012 one-liner: download install.bat to TEMP and run (pure cmd, no PowerShell).
+     */
+    static String buildWindowsLegacyInstallCommand(String batUrl, String pinHex) {
+        String installBat = "\"%TEMP%\\install.bat\"";
+        String curl;
+        if (pinHex == null || pinHex.isBlank()) {
+            curl = "curl.exe -fsSL -o " + installBat + " " + batUrl;
+        } else {
+            String pinned = "sha256//" + Base64.getEncoder().encodeToString(HexFormat.of().parseHex(pinHex));
+            curl = "curl.exe -fsSL -k --pinnedpubkey " + pinned + " -o " + installBat + " " + batUrl;
+        }
+        // This is pasted directly into an elevated cmd.exe, so avoid a redundant cmd /c and nested quotes.
+        return curl + " && call " + installBat;
+    }
+
+    /**
+     * One-click update: download install.ps1 under ProgramData (LocalSystem may have no TEMP).
+     */
+    static String buildWindowsUpdateCommand(String ps1Url, String pinHex) {
+        String curl;
+        if (pinHex == null || pinHex.isBlank()) {
+            curl = "curl.exe -fsSL -o $f " + ps1Url;
+        } else {
+            String pinned = "sha256//" + Base64.getEncoder().encodeToString(HexFormat.of().parseHex(pinHex));
+            curl = "curl.exe -fsSL -k --pinnedpubkey " + pinned + " -o $f " + ps1Url;
+        }
+        return "$d=Join-Path $env:ProgramData 'woops-agent'; "
+                + "New-Item -ItemType Directory -Force -Path $d | Out-Null; "
+                + "$f=Join-Path $d 'install.ps1'; " + curl
+                + "; if ($LASTEXITCODE -ne 0) { throw 'curl failed' }; "
+                + "powershell -NoProfile -ExecutionPolicy Bypass -File $f";
+    }
+
+    /**
+     * Legacy manual update fallback: download install.bat under ProgramData.
+     */
+    static String buildWindowsLegacyUpdateCommand(String batUrl, String pinHex) {
+        String curl;
+        if (pinHex == null || pinHex.isBlank()) {
+            curl = "curl.exe -fsSL -o $f " + batUrl;
+        } else {
+            String pinned = "sha256//" + Base64.getEncoder().encodeToString(HexFormat.of().parseHex(pinHex));
+            curl = "curl.exe -fsSL -k --pinnedpubkey " + pinned + " -o $f " + batUrl;
+        }
+        return "$d=Join-Path $env:ProgramData 'woops-agent'; "
+                + "New-Item -ItemType Directory -Force -Path $d | Out-Null; "
+                + "$f=Join-Path $d 'install.bat'; " + curl
+                + "; if ($LASTEXITCODE -ne 0) { throw 'curl failed' }; "
+                + "& cmd.exe /d /c ('call \"' + $f + '\"')";
     }
 
     public record RegisterRequest(

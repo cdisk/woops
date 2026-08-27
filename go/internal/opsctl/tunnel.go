@@ -122,7 +122,11 @@ func retryDelay(attempt int) time.Duration {
 	if attempt < 0 {
 		attempt = 0
 	}
-	base := time.Second << min(attempt, 5)
+	cap := attempt
+	if cap > 5 {
+		cap = 5
+	}
+	base := time.Second << cap
 	jitter := 0.8 + mathrand.Float64()*0.4
 	delay := time.Duration(float64(base) * jitter)
 	if delay > 30*time.Second {

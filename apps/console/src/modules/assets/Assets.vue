@@ -146,15 +146,17 @@
           </button>
           <div v-show="curlTipOpen" class="install-curl-tip-body">
             <p>{{ t('assets.curlInstallIntro') }}</p>
-            <pre class="install-proxy-pre">{{ t('assets.curlInstallSteps') }}
-$env:Path = "C:\Windows\System32;$env:Path"
-Get-Command curl.exe
-
-winget install --id cURL.cURL -e --accept-package-agreements --accept-source-agreements
-
-#    $env:Path = "D:\path\to\curl\bin;$env:Path"</pre>
+            <pre class="install-proxy-pre">{{ t('assets.curlInstallSteps') }}</pre>
           </div>
         </div>
+      </div>
+      <div class="install-block">
+        <div class="install-label">{{ t('assets.installWindowsCmd') }}</div>
+        <el-input type="textarea" :rows="3" v-model="installCmd" readonly />
+        <el-button size="small" class="copy-btn" @click="copyText(installCmd)">
+          <IconCopy :size="16" stroke="1.75" />
+          {{ t('common.copy') }}
+        </el-button>
       </div>
       <div class="install-proxy-note">
         <button type="button" class="install-curl-tip-toggle" @click="proxyTipOpen = !proxyTipOpen">
@@ -216,6 +218,7 @@ const installVisible = ref(false)
 const installGroupName = ref('')
 const installCurl = ref('')
 const installPowershell = ref('')
+const installCmd = ref('')
 const installExpiresAt = ref(null)
 const installNow = ref(Date.now())
 const curlTipOpen = ref(false)
@@ -367,6 +370,7 @@ async function openInstall() {
     installGroupName.value = node.name || node.label || ''
     installCurl.value = data.curl || ''
     installPowershell.value = data.powershell || ''
+    installCmd.value = data.cmd || ''
     const exp = data.expiresAt ? Date.parse(data.expiresAt) : NaN
     installExpiresAt.value = Number.isFinite(exp) ? exp : Date.now() + 15 * 60 * 1000
     curlTipOpen.value = false

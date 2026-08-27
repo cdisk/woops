@@ -55,7 +55,48 @@ class InstallCommandPinTest {
         assertTrue(cmd.contains("woops-agent"));
         assertTrue(!cmd.contains("'ops-agent'"));
         assertTrue(cmd.contains("$env:HTTPS_PROXY=$p"));
+        assertTrue(cmd.contains("[System.IO.File]::ReadAllText($c)"));
+        assertTrue(!cmd.contains("Get-Content -Raw"));
         assertTrue(cmd.endsWith(base));
+    }
+
+    @Test
+    void windowsLegacyCmdWithPin() {
+        String hex = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+        String b64 = Base64.getEncoder().encodeToString(HexFormat.of().parseHex(hex));
+        String cmd = AgentService.buildWindowsLegacyInstallCommand("https://gw/i/c/install.bat", hex);
+        assertTrue(cmd.startsWith("curl.exe -fsSL"));
+        assertTrue(cmd.contains("curl.exe -fsSL -k --pinnedpubkey sha256//" + b64));
+        assertTrue(cmd.contains("\"%TEMP%\\install.bat\""));
+        assertTrue(!cmd.contains("cmd.exe"));
+        assertTrue(cmd.endsWith("call \"%TEMP%\\install.bat\""));
+    }
+
+    @Test
+    void windowsLegacyCmdWithoutPin() {
+        String cmd = AgentService.buildWindowsLegacyInstallCommand("https://gw/i/c/install.bat", "");
+        assertTrue(cmd.equals("curl.exe -fsSL -o \"%TEMP%\\install.bat\" https://gw/i/c/install.bat && call \"%TEMP%\\install.bat\""));
+    }
+
+    @Test
+    void windowsLegacyUpdateUsesProgramDataFromPowerShellExec() {
+        String cmd = AgentService.buildWindowsLegacyUpdateCommand("https://gw/i/c/install.bat", "");
+        assertTrue(cmd.contains("$env:ProgramData"));
+        assertTrue(cmd.contains("curl.exe -fsSL -o $f https://gw/i/c/install.bat"));
+        assertTrue(cmd.contains("Join-Path $d 'install.bat'"));
+        assertTrue(cmd.contains("& cmd.exe /d /c"));
+        assertTrue(!cmd.contains("%TEMP%"));
+    }
+
+    @Test
+    void windowsUpdateUsesProgramDataAndInstallPs1() {
+        String cmd = AgentService.buildWindowsUpdateCommand("https://gw/i/c/install.ps1", "");
+        assertTrue(cmd.contains("$env:ProgramData"));
+        assertTrue(cmd.contains("curl.exe -fsSL -o $f https://gw/i/c/install.ps1"));
+        assertTrue(cmd.contains("Join-Path $d 'install.ps1'"));
+        assertTrue(cmd.contains("-File $f"));
+        assertTrue(!cmd.contains("install.bat"));
+        assertTrue(!cmd.contains("%TEMP%"));
     }
 
     @Test
