@@ -210,6 +210,8 @@ npm run dev
 4. 安装码约 **15 分钟**有效、期内可多次用；过期重新生成。脚本会下载 Agent、向 Gateway 注册，并落盘服务（Linux 优先 `/usr/local/bin/woops-agent`，Windows 服务名 `woops-agent`）。
 5. 控制台资产列表出现该主机且为「在线」即成功。重装会保留 `asset-id`、轮换 `agent-token`。
 
+**离线 / Bridge / 手工控步骤**：见 [`docs/agent-manual-install.md`](./docs/agent-manual-install.md)（从 Gateway Docker 拷二进制、写 `agent.yaml` / `install-code`、systemd、查日志）。
+
 支持的操作系统见 **§1.4**。
 
 网闸 / 多级内网：在能出网的机器上装 Agent，打开**自带受限**入站 `proxy.*` 作跳板；更深主机安装前设 `https_proxy` 指向该跳板（写入 `gatewayProxy`）。详见上文 **「网闸与多级内网（Agent 自带受限 proxy）」**；控制台安装弹窗也有变量示例。
@@ -276,7 +278,7 @@ apps/console         Vue3 + Element Plus（en/zh）
 go/cmd/{gateway,agent,woopsctl}
 go/internal/opsctl   woopsctl 内部实现
 deploy/              docker-compose、Dockerfile、env.prod.example、gen-gateway-tls.sh
-docs/                woopsctl CI 说明、screenshots/ 界面截图
+docs/                Agent 手动安装、woopsctl CI 说明、screenshots/ 界面截图
 ```
 
 ## 反馈

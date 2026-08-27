@@ -5,18 +5,8 @@ $InstallCode = '{{INSTALL_CODE}}'
 $GatewayTlsSpkiSha256 = '{{GATEWAY_TLS_SPKI_SHA256}}'
 $AgentSha256Amd64 = '{{AGENT_SHA256_AMD64}}'
 $AgentSha256Arm64 = '{{AGENT_SHA256_ARM64}}'
-# $Os = binary download family; $OsLabel = inventory pretty name (Caption).
 $Os = 'windows'
 $Arch = if ($env:PROCESSOR_ARCHITECTURE -match 'ARM64') { 'arm64' } else { 'amd64' }
-$OsLabel = 'Windows'
-try {
-  $cim = Get-CimInstance -ClassName Win32_OperatingSystem -ErrorAction Stop
-  if ($cim.Caption) { $OsLabel = ([string]$cim.Caption).Trim() }
-} catch {
-  try {
-    $OsLabel = [System.Environment]::OSVersion.VersionString
-  } catch {}
-}
 
 $ConfDir = Join-Path $env:ProgramData 'woops-agent'
 $BinDir = Join-Path $env:ProgramFiles 'woops-agent'
@@ -35,15 +25,10 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 
 New-Item -ItemType Directory -Force -Path $ConfDir, $BinDir | Out-Null
 
-$idFile = Join-Path $ConfDir 'asset-id'
-
 function Invoke-GwRequest {
   param(
     [Parameter(Mandatory = $true)][string]$Uri,
-    [string]$OutFile,
-    [string]$Method = 'GET',
-    [string]$Body,
-    [string]$ContentType
+    [string]$OutFile
   )
   $pin = ($GatewayTlsSpkiSha256 | ForEach-Object { $_.Trim() })
   if ($pin) {
@@ -56,27 +41,17 @@ function Invoke-GwRequest {
     }
     $b64 = [Convert]::ToBase64String($bytes)
     # -k: self-signed fails CA check before pin; pin still enforced by curl
-    $args = @('-fsSL', '-k', '--pinnedpubkey', "sha256//$b64", '-X', $Method)
-    if ($ContentType) { $args += @('-H', "Content-Type: $ContentType") }
-    if ($Body) {
-      $tmpBody = [System.IO.Path]::GetTempFileName()
-      [System.IO.File]::WriteAllText($tmpBody, $Body)
-      $args += @('--data-binary', "@$tmpBody")
-    }
+    $args = @('-fsSL', '-k', '--pinnedpubkey', "sha256//$b64")
     if ($OutFile) { $args += @('-o', $OutFile) }
     $args += $Uri
     & curl.exe @args
     $code = $LASTEXITCODE
-    if ($Body) { Remove-Item -Force -ErrorAction SilentlyContinue $tmpBody }
-    if ($code -ne 0) { throw "curl failed exit=$code uri=$Uri" }
+    if ($code -ne 0) { throw "gateway download failed (curl exit=$code)" }
     return
   }
   if ($OutFile) {
-    Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UseBasicParsing -Method $Method
+    Invoke-WebRequest -Uri $Uri -OutFile $OutFile -UseBasicParsing
     return
-  }
-  if ($Method -eq 'POST') {
-    return Invoke-RestMethod -Method Post -Uri $Uri -ContentType $ContentType -Body $Body
   }
   return Invoke-RestMethod -Uri $Uri -UseBasicParsing
 }
@@ -124,17 +99,13 @@ try {
 } catch {}
 $Live = $svcRunning -or [bool](Get-Process -Name 'woops-agent' -ErrorAction SilentlyContinue)
 if ($Live) {
-  Write-Host '==> Live update: keep current agent until download/register finish'
+  Write-Host '==> Live update: keep current agent until download and staging finish'
 } else {
   Write-Host '==> Stopping previous woops-agent (if any)'
   Stop-WoopsAgent
   Start-Sleep -Seconds 1
 }
 
-$ExistingAssetId = ''
-if (Test-Path $idFile) {
-  $ExistingAssetId = (Get-Content -Raw $idFile).Trim()
-}
 Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $ConfDir 'agent-id')
 
 Write-Host "==> Downloading woops-agent ($Os/$Arch)..."
@@ -192,68 +163,29 @@ try {
 if (-not $AgentVersion) { throw "cannot read version from $Dest" }
 Write-Host "==> Agent version: $AgentVersion"
 
-$Hostname = $env:COMPUTERNAME
-$PrivateIp = ''
-try {
-  $PrivateIp = ((Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
-    Where-Object { $_.IPAddress -notlike '127.*' -and $_.PrefixOrigin -ne 'WellKnown' } |
-    Select-Object -ExpandProperty IPAddress) -join ',')
-} catch {}
-
-Write-Host "==> Detected OS: $OsLabel"
-if ($ExistingAssetId) {
-  $BodyObj = @{
-    installCode  = $InstallCode
-    assetId      = $ExistingAssetId
-    agentVersion = $AgentVersion
-    hostname     = $Hostname
-    os           = $OsLabel
-    arch         = $Arch
-    privateIp    = $PrivateIp
-  }
-  Write-Host "==> Re-registering assetId=$ExistingAssetId (refresh token)"
-} else {
-  $BodyObj = @{
-    installCode  = $InstallCode
-    agentVersion = $AgentVersion
-    hostname     = $Hostname
-    os           = $OsLabel
-    arch         = $Arch
-    privateIp    = $PrivateIp
-  }
-  Write-Host '==> First-time register'
-}
-$Body = $BodyObj | ConvertTo-Json -Compress
-if ($GatewayTlsSpkiSha256) {
-  $tmpResp = [System.IO.Path]::GetTempFileName()
-  Invoke-GwRequest -Uri "$GatewayBase/api/agent/register" -OutFile $tmpResp -Method POST -Body $Body -ContentType 'application/json'
-  $Resp = Get-Content -Raw $tmpResp | ConvertFrom-Json
-  Remove-Item -Force -ErrorAction SilentlyContinue $tmpResp
-} else {
-  $Resp = Invoke-RestMethod -Method Post -Uri "$GatewayBase/api/agent/register" -ContentType 'application/json' -Body $Body
-}
-$Resp | ConvertTo-Json -Compress | Write-Host
-
-$AssetId = [string]$Resp.assetId
-$AgentToken = [string]$Resp.agentToken
-if (-not $AssetId) { throw 'register failed: empty assetId' }
-if ($Resp.reused) { Write-Host '==> Reused existing asset (token refreshed)' }
-else { Write-Host '==> Registered as new asset' }
-
 # Keep https:// (or http:// for local dev); do not strip scheme.
 $GatewayUrl = $GatewayBase.TrimEnd('/')
 $TlsPin = $GatewayTlsSpkiSha256
 $Cfg = Join-Path $ConfDir 'agent.yaml'
+function Set-AtomicContent([string]$Path, [object]$Value, [string]$Encoding) {
+  $tmp = Join-Path ([System.IO.Path]::GetDirectoryName($Path)) ('.' + [System.IO.Path]::GetFileName($Path) + '.' + [Guid]::NewGuid().ToString('N') + '.tmp')
+  Set-Content -LiteralPath $tmp -Value $Value -Encoding $Encoding
+  if (Test-Path -LiteralPath $Path) {
+    [System.IO.File]::Replace($tmp, $Path, $null)
+  } else {
+    Move-Item -LiteralPath $tmp -Destination $Path
+  }
+}
 # Fresh install: annotated template. Re-install: refresh gateway + pin, keep other local edits.
 if (Test-Path -LiteralPath $Cfg) {
   $lines = Get-Content -LiteralPath $Cfg
   $replacedGateway = $false
   $replacedPin = $false
   $out = foreach ($line in $lines) {
-    if (-not $replacedGateway -and $line -match '^\s*gateway:') {
+    if (-not $replacedGateway -and $line -match '^gateway:') {
       $replacedGateway = $true
       'gateway: "' + $GatewayUrl + '"'
-    } elseif (-not $replacedPin -and $line -match '^\s*gatewayTlsSpkiSha256:') {
+    } elseif (-not $replacedPin -and $line -match '^gatewayTlsSpkiSha256:') {
       $replacedPin = $true
       'gatewayTlsSpkiSha256: "' + $TlsPin + '"'
     } else {
@@ -266,13 +198,13 @@ if (Test-Path -LiteralPath $Cfg) {
   if (-not $replacedPin) {
     $out = @($out) + @('gatewayTlsSpkiSha256: "' + $TlsPin + '"')
   }
-  Set-Content -Path $Cfg -Value $out -Encoding utf8
+  Set-AtomicContent -Path $Cfg -Value $out -Encoding utf8
 } else {
   # Base64 avoids PowerShell @'...'@ here-string terminator rules (closing '@ must be column 0;
   # also breaks under some download/encoding paths).
   $Yaml = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('{{AGENT_YAML_TEMPLATE_B64}}'))
   $Yaml = $Yaml.Replace('__GATEWAY__', $GatewayUrl).Replace('__TLS_PIN__', $TlsPin)
-  Set-Content -Path $Cfg -Value $Yaml -Encoding utf8
+  Set-AtomicContent -Path $Cfg -Value $Yaml -Encoding utf8
 }
 
 # Persist install-time proxy env so the Windows Service Agent can CONNECT to Gateway.
@@ -282,7 +214,7 @@ function Set-YamlQuotedKey([string]$Path, [string]$Key, [string]$Value) {
   $lines = @(Get-Content -LiteralPath $Path)
   $done = $false
   $out = foreach ($l in $lines) {
-    if (-not $done -and $l -match ("^\s*" + [regex]::Escape($Key) + ":")) {
+    if (-not $done -and $l -match ("^" + [regex]::Escape($Key) + ":")) {
       $done = $true
       $line
     } else {
@@ -293,7 +225,7 @@ function Set-YamlQuotedKey([string]$Path, [string]$Key, [string]$Value) {
     $inserted = $false
     $out2 = foreach ($l in $out) {
       $l
-      if (-not $inserted -and $l -match '^\s*gatewayTlsSpkiSha256:') {
+      if (-not $inserted -and $l -match '^gatewayTlsSpkiSha256:') {
         $line
         $inserted = $true
       }
@@ -301,7 +233,7 @@ function Set-YamlQuotedKey([string]$Path, [string]$Key, [string]$Value) {
     if (-not $inserted) { $out2 = @($out2) + @($line) }
     $out = $out2
   }
-  Set-Content -Path $Path -Value $out -Encoding utf8
+  Set-AtomicContent -Path $Path -Value $out -Encoding utf8
 }
 $GwProxy = Get-InstallGatewayProxy
 if ($GwProxy) {
@@ -309,8 +241,23 @@ if ($GwProxy) {
   Set-YamlQuotedKey -Path $Cfg -Key 'gatewayProxy' -Value $GwProxy
 }
 
-Set-Content -Path $idFile -Value $AssetId -Encoding ascii
-Set-Content -Path (Join-Path $ConfDir 'agent-token') -Value $AgentToken -Encoding ascii
+# Agent bootstrap owns registration and atomic credential replacement. Publish
+# install-code only after agent.yaml is final.
+$InstallCodePath = Join-Path $ConfDir 'install-code'
+$InstallCodeTmp = Join-Path $ConfDir ('.install-code.' + [Guid]::NewGuid().ToString('N') + '.tmp')
+Set-Content -LiteralPath $InstallCodeTmp -Value $InstallCode -Encoding ascii
+& icacls.exe $InstallCodeTmp /inheritance:r /grant:r '*S-1-5-18:F' '*S-1-5-32-544:F' | Out-Null
+if ($LASTEXITCODE -ne 0) {
+  Remove-Item -Force -ErrorAction SilentlyContinue $InstallCodeTmp
+  throw 'failed to restrict temporary install-code ACL'
+}
+if (Test-Path -LiteralPath $InstallCodePath) {
+  [System.IO.File]::Replace($InstallCodeTmp, $InstallCodePath, $null)
+} else {
+  Move-Item -LiteralPath $InstallCodeTmp -Destination $InstallCodePath
+}
+& icacls.exe $InstallCodePath /inheritance:r /grant:r '*S-1-5-18:F' '*S-1-5-32-544:F' | Out-Null
+if ($LASTEXITCODE -ne 0) { throw 'failed to verify install-code ACL' }
 
 $BinPathName = '"' + $Bin + '" -config "' + $Cfg + '"'
 function Install-WoopsAgentService {
@@ -364,5 +311,23 @@ if ($Live) {
   Start-Sleep -Seconds 1
   Start-Service -Name $ServiceName
   Write-Host 'woops-agent service started'
+  Write-Host '==> Waiting up to 60s for Agent bootstrap registration...'
+  $registered = $false
+  $AssetIdPath = Join-Path $ConfDir 'asset-id'
+  $AgentTokenPath = Join-Path $ConfDir 'agent-token'
+  for ($i = 0; $i -lt 60; $i++) {
+    $hasAsset = (Test-Path -LiteralPath $AssetIdPath) -and ((Get-Item -LiteralPath $AssetIdPath).Length -gt 0)
+    $hasToken = (Test-Path -LiteralPath $AgentTokenPath) -and ((Get-Item -LiteralPath $AgentTokenPath).Length -gt 0)
+    if ($hasAsset -and $hasToken -and -not (Test-Path -LiteralPath $InstallCodePath)) {
+      $registered = $true
+      break
+    }
+    Start-Sleep -Seconds 1
+  }
+  if (-not $registered) {
+    $state = (Get-Service -Name $ServiceName -ErrorAction SilentlyContinue).Status
+    Write-Error "Agent registration did not complete within 60s (service=$state). Check $ConfDir\woops-agent.log; credentials were not printed."
+  }
+  Write-Host '==> Agent registered successfully.'
   Write-Host "    Restart later: Restart-Service $ServiceName"
 }

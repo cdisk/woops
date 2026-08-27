@@ -156,6 +156,8 @@ export default {
     detailTitle: 'Details',
     settingsTitle: 'Asset settings',
     installCommands: 'Install commands',
+    installCode: 'Install code',
+    installCodeHint: 'For offline manual install, write this to /etc/woops-agent/install-code on the target host; or take the segment after /i/ in the URLs below.',
     installWindowsCmd: 'Windows (CMD / Win7·Server 2012)',
     registerHint: 'The host will register/update into group “{group}”.',
     installExpired: 'Install code expired. Close and generate again.',

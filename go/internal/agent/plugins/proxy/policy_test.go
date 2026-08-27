@@ -61,6 +61,12 @@ func TestResolveBlockLoopbackWhenGlobal(t *testing.T) {
 	if _, err := cfg.resolveAndCheckDest("169.254.169.254", 80, ops); err == nil {
 		t.Fatal("metadata should be blocked")
 	}
+	if _, err := cfg.resolveAndCheckDest("100.100.100.200", 80, ops); err == nil {
+		t.Fatal("cloud metadata should be blocked")
+	}
+	if _, err := cfg.resolveAndCheckDest("fd00:ec2::254", 80, ops); err == nil {
+		t.Fatal("IPv6 metadata should be blocked")
+	}
 }
 
 func TestResolveOpsLoopbackExempt(t *testing.T) {
@@ -89,5 +95,15 @@ func TestSameProxyTarget(t *testing.T) {
 	}
 	if sameProxyTarget(u, "liteops.example", 9200) {
 		t.Fatal("gateway is not upstream")
+	}
+}
+
+func TestSameListenAddressWildcardMatchesLoopback(t *testing.T) {
+	u, _ := url.Parse("http://127.0.0.1:3128")
+	if !sameListenAddress(u, "0.0.0.0:3128") {
+		t.Fatal("wildcard listener should match local loopback proxy")
+	}
+	if sameListenAddress(u, "0.0.0.0:3129") {
+		t.Fatal("different port should not match")
 	}
 }

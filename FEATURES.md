@@ -4,7 +4,7 @@
 > 任何功能新增、完成、搁置、行为变更，都必须先读本文件，并在同一变更中更新对应条目的状态与说明。  
 > README 只保留快速启动。历史设计稿 `bastion_architecture_design_*.plan.md` 不必再读。
 
-**最后更新：** 2026-08-27（Windows 安装命令本地文件名统一为 install.bat / install.ps1）
+**最后更新：** 2026-08-27（Agent 手动安装文档 + 控制台单独复制安装码）
 
 ---
 
@@ -32,7 +32,7 @@
 | 数据面 | 控制 1 条 WSS + **一会话一数据 WSS** + **可选监控 WSS**（插件 `/ws/agent/metrics`）；Gateway 不连库；无 Redis/MinIO；文件内容走独立 `filetransfer` 会话（Binary），目录操作走 `filemanager` JSON-RPC |
 | 控制面 | Java 唯一写 PostgreSQL；短时票据；本地管理员 break-glass（账密 **强制 TOTP**）；交互登录目标为 GitLab OAuth（GitLab 路径无堡垒侧 2FA） |
 | Agent 身份 | 安装下发：`asset-id`（= `assets.id`）+ `agent-token`；重装保留 id、刷新 token；无并行 `agentId`；清库后旧 token 失效，须用安装码重装轮换 token（`asset-id` 只标识不证明所有权） |
-| Agent 配置 | 运维配 `agent.yaml` 的 `gateway`（保留 `https://`）+ 可选 `gatewayTlsSpkiSha256`；凭据不进 yaml；WS 路径代码内拼接 |
+| Agent 配置 | 运维配 `agent.yaml` 的 `gateway`（保留 `https://`）+ 可选 `gatewayTlsSpkiSha256`；Agent 身份凭据不进 yaml；WS 路径代码内拼接。安装脚本只写旁路一次性 `install-code` 后启动 Agent，由 Agent 经直连 / `gatewayProxy` / `proxyBridge` 自注册，原子落 `asset-id`/`agent-token` 后删除安装码 |
 | Gateway TLS | 生产 Agent 走 `wss://`；公有 CA 可省略 pin；自签名/动态 IP 用 SPKI SHA-256 pin（`OPS_GATEWAY_TLS_SPKI_SHA256`，control-api 与 Gateway 同值；安装命令/脚本/`agent.yaml` 同源）；非本机禁止明文 `ws://`；**禁止**忽略证书校验。自签名+算 pin：[`deploy/gen-gateway-tls.sh`](deploy/gen-gateway-tls.sh) |
 | 本地端口 | **9100** = control-api（REST）；Gateway **9200 PUBLIC**（https/wss）+ **9201 INTERNAL**（http）；Compose 下 Gateway **host 网络**直绑；Console Docker **443**。生产可用 Nginx 终止 TLS 后反代。**公网只放 443 + 9200**（正向 portmap 另放 20000–21000）；9100/9201/5432/4822 靠服务器防火墙/安全组，**不**在 compose 里绑 `127.0.0.1`（Gateway host 网需要宿主机环回映射；**9201 绑环回会断** console→`host.docker.internal`）。Console nginx 已 404 `/api/internal`、`/api/sessions/internal`、`/api/opsctl` |
 | URL 变量 | 模板 [`.env.example`](.env.example)（中文注释）；本机复制为 `.env`（**gitignore，勿提交**），`scripts/load-env.ps1` 先加载 `.env`，再叠加 `.env.local`。**PUBLIC** / **INTERNAL** 见该文件。Compose full：Gateway host 网 → `OPS_CONTROL_INTERNAL_HTTP=http://127.0.0.1:9100`、bridge 服务经 `host.docker.internal:9201` 调 Gateway |
@@ -50,7 +50,7 @@
 | `[x]` | guacd sidecar | `deploy/docker-compose.yml` → `guacamole/guacd:1.5.5`（发布宿主 `:4822`）；Gateway `OPS_GUACD_ADDR=127.0.0.1:4822`、`OPS_GUAC_BRIDGE_HOST=host.docker.internal`；console/control-api/guacd 配 `extra_hosts: host.docker.internal:host-gateway` |
 | `[x]` | `data/ops-audit/` 卷 | 运行态 JSONL **与会话录像**的本地根目录；`OPS_AUDIT_DIR`（默认 `./data/ops-audit`；Compose `/data/ops-audit` 同时挂 control-api / gateway / guacd）；已 gitignore |
 | `[ ]` | `openapi/` 契约 | Java REST → Vue TS client |
-| `[~]` | 运维文档 | CI 已有 [`docs/woopsctl-gitlab-ci.md`](docs/woopsctl-gitlab-ci.md)；README 已写清 **`deploy/tls` 不入库、编译不自动生成**、须跑 `gen-gateway-tls.sh`（或自备证书+pin）；README **界面预览**截图在 [`docs/screenshots/`](docs/screenshots/)；README §4 已拆 **方法 1 安装码** / **方法 2 本机调试**；README 已有 **网闸多级内网**（Agent **自带受限** `proxy.*`：账密 / CIDR / 默认仅 ops；`gatewayProxy` 串联）拓扑说明；仍缺 GitLab OAuth / Agent 安装运维专文 |
+| `[~]` | 运维文档 | CI 已有 [`docs/woopsctl-gitlab-ci.md`](docs/woopsctl-gitlab-ci.md)；Linux Agent **离线/Bridge 手工安装** [`docs/agent-manual-install.md`](docs/agent-manual-install.md)（Docker 拷 bin、`agent.yaml`、`install-code`、systemd、日志）；README §4 已链入；控制台安装弹窗可**单独复制安装码**；README 已写清 **`deploy/tls` 不入库** 等；仍缺 GitLab OAuth 专文 |
 | `[x]` | 健康检查 | control-api `/api/health`、gateway `/health` |
 | `[x]` | 公网/LAN URL 解析 | `PublicUrlResolver`：配置了非 loopback 的 `OPS_GATEWAY_PUBLIC_*` / `OPS_CONTROL_PUBLIC_HTTP` 时用配置；仅 loopback 时按浏览器 Origin 改写 LAN IP；`GatewayClient` 走 `OPS_GATEWAY_INTERNAL_HTTP` |
 | `[x]` | 代码组织约定 | Java 按业务模块（`PageSupport`、`AccessService`、`SessionTicketService` → `ProtocolRegistry` + `protocol.*TicketIssuer`）。Go 最终分类：Agent `agent/{app,core,sessions,services,plugins,infra,sessionreg}`；Gateway `gateway/{app,core,sessions,services,plugins,infra}`。`app` 是唯一具体组合根并可依赖全部功能；`core` 只依赖注入契约，不得反向依赖 `sessions/services/plugins`；功能实现不得跨 `sessions/services/plugins` 横向依赖另一功能。共享契约位于 `internal/{protocol,sessioncore,sessionws,tlsutil,wsutil,hostinfo}`；UDP 帧为 `protocol/datagram`，网卡筛选为 `hostinfo/netiface`；Guacamole 实现由 `gateway/sessions/desktop/guac` 私有拥有。Gateway 验票边界只返回 `BaseClaims`+原始 JSON，`sessioncore.BridgeSpec` 提供通用桥接编排；`cmd/{agent,gateway}` 只进入各自 `app`。Vue `features/registry.js` 是路由/资产动作唯一聚合点；忌过度抽象 |
@@ -108,10 +108,10 @@
 | `[x]` | `GET /i/{code}/install.sh` | Linux：`curl … \| bash`；源文件 `go/internal/gateway/services/agentinstall/install.sh`（embed） |
 | `[x]` | `GET /i/{code}/install.ps1` | Windows（Win10+）：`curl.exe -o $env:TEMP\…; powershell -File`；有 pin：`-k --pinnedpubkey`；源文件 `gateway/services/agentinstall/install.ps1` |
 | `[x]` | `GET /i/{code}/install.bat` | Windows legacy（Win7 / Server 2012）：纯 cmd、**ASCII-only REM**、**CRLF**；**手工安装**下载 `%TEMP%\install.bat`；**一键更新**下载 `%ProgramData%\woops-agent\install.bat` 再 `cmd /c call`；`LIVE=1` 时暂存 `woops-agent-new.exe` 后 `restart-update.bat` 异步重启；`agent.yaml` **整文件重写**为 ASCII 最小配置（禁止 findstr 合并 UTF-8/BOM，否则 `yaml: line 3`）；`asset-id` 用 `set /p` 复用；build &lt; 17763 自动下 WinPTY |
-| `[x]` | `GET /i/{code}/agent/{os}/{arch}` | 产物名 `woops-agent-{os}-{arch}`（`.exe`/`.gz`）；`-ldflags=-s -w -X main.Version=…`；可选旁路 `.gz`，安装脚本 `?format=gz` 优先（约 10MB→3MB 下载）；**Docker Gateway** 同步编 `linux/amd64` + `windows/amd64`；gateway/Linux/woopsctl 用当前 Go，**Windows Agent 独立固定 Go 1.20.14**（Go 1.21+ 产物不能运行于 Win7 / Server 2012） |
+| `[x]` | `GET /i/{code}/agent/{os}/{arch}` | 产物名 `woops-agent-{os}-{arch}`（`.exe`/`.gz`）；`-ldflags=-s -w -X main.Version=…`；可选旁路 `.gz`，安装脚本 `?format=gz` 优先（约 10MB→3MB 下载）；**Docker Gateway** 同步编 `linux/amd64` + `linux/arm64` + `windows/amd64`；gateway/Linux/woopsctl 用当前 Go，**Windows Agent 独立固定 Go 1.20.14**（Go 1.21+ 产物不能运行于 Win7 / Server 2012） |
 | `[x]` | `GET /bin/woopsctl/{os}/{arch}` | 公开下载（无需安装码）；产物 `woopsctl-{os}-{arch}`（Windows `.exe`）；**Docker Gateway** 同编 `linux/amd64` + `windows/amd64`；Console 部署 Token 旁下拉；nginx/Vite 同源 `/bin/` 反代 Gateway |
-| `[x]` | install 脚本行为 | 先下载再注册；保留 `asset-id`；上报 `agentVersion`；**在线更新**：`LIVE=1`（一键更新/Web Shell）**始终**延迟 stop→start（安装进程内不停活 agent）；优先 `systemd-run --no-block` 调度 `restart-update.sh`（脱离 exec 会话，避免会话结束清掉 setsid 子进程），否则回退 `setsid`/`nohup`；Windows legacy CMD 同样先暂存 `woops-agent-new.exe`/`winpty-new.*`，再由独立 `restart-update.bat` 停服务、替换并启动；停旧启新仅在 `restart-update.*` / 冷装 `start_agent`；仅当最终路径上的 `woops-agent` 正在运行时才暂存 `*-new`（避免 ETXTBSY）；杀进程只用 `pkill -x woops-agent`（禁用 `pkill -f`）；**Linux**：优先 `/usr/local/bin/woops-agent`，仅下载失败或 live 无法写该路径时才建 `/opt/woops-agent/`；**Windows**：注册服务 `woops-agent`；首装写入 `gateway`+`gatewayTlsSpkiSha256`；首装后更新保留既有 `agent.yaml`；旧 PowerShell 读取代理配置使用 `.NET ReadAllText`（不依赖 PS3 `Get-Content -Raw`）；**仅 `GATEWAY_BASE`**；下载/注册按 pin；Gateway 嵌入 agent SHA-256；**依赖预检** curl/xxd/sha256sum；gzip 可选；**主机名/内网 IP** 不强制 `hostname(1)`。**已移除** `ops-agent` 迁移/回退 |
-| `[x]` | Agent HTTPS 注册 | 响应 `assetId`/`agentToken`/`reused`；可选 `assetId` 复用并轮换 token，同时按安装码 `groupId` 迁移分组；上报 `os` 详细版本 + `agentVersion`；**公网只打 Gateway**：`POST /api/agent/register` 由 Gateway 反代到私网 control-api |
+| `[x]` | install 脚本行为 | 先下载并校验，再更新 `agent.yaml`，原子写权限受限的旁路 `install-code`，最后启动 Agent；**注册由 Agent 完成**，脚本不再 POST/解析注册响应或写身份凭据。冷装等待最多 60s，确认 `asset-id`/`agent-token` 非空且安装码已消费；重装保留 `asset-id`，Agent 提交旧 id 以迁组并轮换 token；**在线更新**：`LIVE=1`（一键更新/Web Shell）始终延迟 stop→start，安装进程内不停活 agent，新进程自注册，Console 轮询重上线；优先 `systemd-run --no-block`，否则回退 `setsid`/`nohup`；Windows legacy CMD 用独立 `restart-update.bat`。Linux/PowerShell 保留本地 `proxy`/`proxyBridge` 配置；legacy BAT 对已有 YAML 原样保留，避免 UTF-8/BOM 与嵌套配置损坏。下载按 pin；Gateway 嵌入 agent SHA-256；依赖预检 curl/xxd/sha256sum；gzip 可选；已移除 `ops-agent` 迁移/回退 |
+| `[x]` | Agent HTTPS 自注册 | Agent 启动先起 pre-auth `proxy`/`proxyBridge`，读取旁路 `install-code`，经统一 Gateway HTTP client 调 `POST /api/agent/register`（Gateway 反代私网 control-api）；响应 `assetId`/`agentToken`/`reused`；可选旧 `assetId` 复用并轮换 token，同时按安装码 `groupId` 迁移分组；上报 hostname、详细 OS/arch、内网 IP、`agentVersion`。凭据临时文件 sync 后原子替换（Windows `MoveFileExW`），确认后删除安装码，无需重启直接进入 control/metrics；同一被拒安装码不轰炸，替换文件后恢复 |
 | `[x]` | Agent 验 Gateway | control / session / metrics（含 portmap 隧道）共用 TLS dialer；有 pin 时校 SPKI；无 pin 走系统 CA；假 Gateway / 错 pin 在握手失败，不发 `agent-token`；可选 `gatewayProxy` 时经 HTTP CONNECT 出站（目标 DNS 由代理解析） |
 | `[x]` | Agent 构建版本 | `-ldflags -X main.Version=yymmddHHMM`；`woops-agent -version`；**Windows** `go/scripts/build-agent-windows.ps1`（`GOTOOLCHAIN=go1.20.14`，Win7–Win11 通用）；Linux `build-agent-linux.sh`；Docker `Dockerfile.gateway` 同步注入 |
 | `[x]` | 控制 WSS | 在线（带 `sourceIp`）、ping、`open_session`、`netinfo`（**仅内网 IP**，不含公网、**不含** metrics）；`ctx` 取消时关闭 WS，避免 `ReadMessage` 卡满读超时（曾致 `systemctl stop` 约 60–90s）；Agent 对 Gateway Ping 用 `PingHandler` 续期 90s 读超时（仅 `PongHandler` 时曾约 90s 周期断连）；**重连前重读** `agent-token`/`asset-id`（一键更新 register 轮换 token 后，旧进程不致永久 `bad handshake`） |
@@ -126,6 +126,7 @@
 | `[ ]` | 资产列表指标摘要 | 可读 `monitor_latest`；未做 |
 | `[x]` | Agent 内置 HTTP 正向代理 | 插件式 `go/internal/agent/plugins/proxy`：`TryStart` 软失败不影响控制面；`agent.yaml` `proxy.*`（enabled/listen/username/password/allowCIDRs/allowGlobal）；CONNECT + forward；账密强制；来源 CIDR；`allowGlobal=false` 仅 ops host（`gateway` 主机 :gwPort+`:9100`）；全局时拒 loopback/元数据；**有 `gatewayProxy` 时入站出站经上游 CONNECT/forward 串联**（防环：拒连上游自身） |
 | `[x]` | 代理模式 + agent 模式同二进制 | 外网/内网1 开入站 `proxy.*`；更深内网装 Agent 时设 `https_proxy`→`gatewayProxy`（本机 WSS + 可选再开 `proxy.*` 给下一跳）；多级：C→B(proxy+gatewayProxy=A)→A(proxy)→Gateway；`proxy.enabled=true` 时自动写本地 `proxy.log`（见下行） |
+| `[x]` | Proxy Bridge 反向载波 | 独立 camelCase `proxyBridge.*`（enabled/listen/key/allowGlobal/targets[address,key]），实现复用 `plugins/proxy` engine；用于 **A 只能主动连 B** 的网络：A targets 主动 TCP 连 B listen，HMAC-SHA256 双向随机挑战认证（64 hex key），yamux 多路承载标准 HTTP forward/CONNECT。B 的 `gatewayProxy` 指向本机 `proxy.listen`，Proxy 父载波优先；A 可 `proxy.enabled=false` 只开 Bridge targets，并继承 A 自己的 `gatewayProxy` 出口。`proxy.allowGlobal` 管普通 listener，`proxyBridge.allowGlobal` 管 peer 流；默认仅 Gateway，全局仍拒 loopback/link-local/metadata。支持 listen+targets 多级 A→B→C、TCP/应用心跳、1–30s 抖动重连；Gateway TLS/WSS 与 pin 端到端不变 |
 | `[x]` | Agent 本地文件日志 | `woops-agent.log`：启动/控制与 metrics 连断、会话 `op START/END/FAIL`；**不**记成功 netinfo / monitor 周期 sent。`proxy.enabled=true` 另开 `proxy.log`（请求 START/END/FAIL、耗时、字节；无凭据/header/body/query）。Linux `/var/log/woops-agent/`；Windows `%ProgramData%\woops-agent\`。lumberjack：50MiB 轮转、压缩、`MaxAge=90`（最长约 90 天）。同步 stderr/journald |
 | `[x]` | 安装命令带 proxy URL / 读环境变量写入配置 | 安装：`curl`/`curl.exe` 认 `https_proxy`/`http_proxy`/`ALL_PROXY`；脚本写入 `agent.yaml` `gatewayProxy`；控制台弹窗说明单引号与密码百分号编码 |
 | `[x]` | Windows 安装 | Win10+：`install.ps1`（PowerShell）；Win7/2012：`install.bat`（cmd，见上行）；OS build &lt; 17763 下载 WinPTY；注册 Service `woops-agent`；**须管理员** |
@@ -318,7 +319,7 @@
 除非改本节，否则不要做：
 
 - Redis、消息队列、微服务拆分、多 Gateway HA 调度  
-- 单 WSS 多路复用 / lane / QUIC / 自定义 RPC  
+- Gateway 单 WSS 多路复用 / lane / QUIC / 自定义 RPC（`proxyBridge` 仅在 Agent↔Agent TCP carrier 内用 yamux 承载彼此独立的标准 HTTP Proxy 连接，不改变一会话一 WSS）
 - Timescale/专用 TSDB（监控用普通 PG 扁表；撑不住再议）、告警通知渠道（邮件/Webhook）、进程列表/Top、GPU/温度/磁盘 util%  
 - 端口映射：Gateway 冷启动不主动拉全量清单（恢复见 §6 Agent 上线）  
 - Agent 自动升级平台（控制台一键更新 + 手工重装即可）  
@@ -350,7 +351,10 @@ Browser ──WSS──► Gateway ──WSS──► Agent
 - Java 不碰实时字节流  
 - 文件内容**不**走 filemanager，也**不**走控制 WSS  
 
-**网闸多级内网（代理）：** A（有外网）开 `proxy.*`；B 装时 `https_proxy=A`→写入 `gatewayProxy`，WSS 经 A 出站，B 也可再开 `proxy.*`（出站自动串 `gatewayProxy`）；C 只达 B 时 `https_proxy=B` 安装上线。Agent 只出站 HTTPS/WSS。
+**网闸多级内网（代理）：**
+
+- 下层可主动连上层：A（有外网）开 `proxy.*`；B 的 `gatewayProxy=A`，WSS 经 A 出站；B 也可再开 `proxy.*` 给 C 串联。
+- 只有上层能主动连下层：B 开 `proxy.*` + `proxyBridge.listen`，`gatewayProxy` 指向 B 本机 proxy；A 开 `proxyBridge.targets=[B]`（普通 `proxy.enabled` 可关）。A→B 建 carrier 后，B 的 HTTP CONNECT 反向复用载波到 A 出口；中间节点可同时 listen+targets 级联。Gateway 仍只见 B 端到端 HTTPS/WSS。
 
 ---
 

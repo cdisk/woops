@@ -6,7 +6,6 @@ INSTALL_CODE="{{INSTALL_CODE}}"
 GATEWAY_TLS_SPKI_SHA256="{{GATEWAY_TLS_SPKI_SHA256}}"
 AGENT_SHA256_AMD64="{{AGENT_SHA256_AMD64}}"
 AGENT_SHA256_ARM64="{{AGENT_SHA256_ARM64}}"
-# OS = binary download family (linux/darwin); OS_LABEL = inventory pretty name.
 OS_KERNEL=$(uname -s | tr '[:upper:]' '[:lower:]')
 case "$OS_KERNEL" in
   linux*) OS=linux ;;
@@ -19,19 +18,10 @@ case "$ARCH" in
   aarch64|arm64) ARCH=arm64 ;;
 esac
 
-OS_LABEL=""
-if [ -r /etc/os-release ]; then
-  # shellcheck disable=SC1091
-  . /etc/os-release
-  OS_LABEL=${PRETTY_NAME:-}
-fi
-if [ -z "$OS_LABEL" ]; then
-  OS_LABEL=$(uname -srm 2>/dev/null || echo "$OS")
-fi
-OS_LABEL_JSON=$(printf '%s' "$OS_LABEL" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')
-
 CONF_DIR=/etc/woops-agent
-mkdir -p "$CONF_DIR" /usr/local/bin /var/log
+install -d -m 0750 "$CONF_DIR" 2>/dev/null || mkdir -p "$CONF_DIR"
+chmod 0750 "$CONF_DIR" 2>/dev/null || true
+mkdir -p /usr/local/bin /var/log
 install -d -m 0750 /var/log/woops-agent 2>/dev/null || mkdir -p /var/log/woops-agent
 
 need_cmd() {
@@ -85,7 +75,7 @@ if agent_running; then
 fi
 
 if [ "$LIVE" = "1" ]; then
-  echo "==> Live update: keep current agent until download/register finish"
+  echo "==> Live update: keep current agent until download and staging finish"
 else
   echo "==> Stopping previous woops-agent (if any)"
   if has_systemd; then
@@ -96,10 +86,6 @@ else
   sleep 1
 fi
 
-EXISTING_ASSET_ID=""
-if [ -s "$CONF_DIR/asset-id" ]; then
-  EXISTING_ASSET_ID=$(tr -d '[:space:]' < "$CONF_DIR/asset-id")
-fi
 rm -f "$CONF_DIR/agent-id" 2>/dev/null || true
 
 verify_agent_sha256() {
@@ -223,74 +209,6 @@ if [ -z "$AGENT_VERSION" ]; then
 fi
 echo "==> Agent version: $AGENT_VERSION"
 
-# Minimal images (busybox / stripped RHEL) often lack hostname(1).
-detect_hostname() {
-  local h=""
-  if command -v hostname >/dev/null 2>&1; then
-    h=$(hostname 2>/dev/null || true)
-  fi
-  if [ -z "$h" ] && [ -r /proc/sys/kernel/hostname ]; then
-    h=$(tr -d '[:space:]' </proc/sys/kernel/hostname || true)
-  fi
-  if [ -z "$h" ] && [ -r /etc/hostname ]; then
-    h=$(tr -d '[:space:]' </etc/hostname || true)
-  fi
-  if [ -z "$h" ]; then
-    h=$(uname -n 2>/dev/null || true)
-  fi
-  if [ -z "$h" ] || [ "$h" = "(none)" ]; then
-    h=unknown
-  fi
-  printf '%s' "$h"
-}
-
-detect_private_ips() {
-  local ips=""
-  if command -v hostname >/dev/null 2>&1; then
-    ips=$(hostname -I 2>/dev/null | tr ' ' ',' | sed 's/,$//' || true)
-  fi
-  if [ -z "$ips" ] && command -v ip >/dev/null 2>&1; then
-    ips=$(ip -4 -o addr show scope global 2>/dev/null \
-      | awk '{gsub(/\/.*/, "", $4); print $4}' \
-      | tr '\n' ',' | sed 's/,$//' || true)
-  fi
-  printf '%s' "$ips"
-}
-
-HOSTNAME=$(detect_hostname)
-PRIVATE_IP=$(detect_private_ips)
-echo "==> Detected OS: $OS_LABEL host=$HOSTNAME"
-if [ -n "$EXISTING_ASSET_ID" ]; then
-  BODY=$(printf '{"installCode":"%s","assetId":"%s","agentVersion":"%s","hostname":"%s","os":"%s","arch":"%s","privateIp":"%s"}' \
-    "$INSTALL_CODE" "$EXISTING_ASSET_ID" "$AGENT_VERSION" "$HOSTNAME" "$OS_LABEL_JSON" "$ARCH" "$PRIVATE_IP")
-  echo "==> Re-registering assetId=$EXISTING_ASSET_ID (refresh token)"
-else
-  BODY=$(printf '{"installCode":"%s","agentVersion":"%s","hostname":"%s","os":"%s","arch":"%s","privateIp":"%s"}' \
-    "$INSTALL_CODE" "$AGENT_VERSION" "$HOSTNAME" "$OS_LABEL_JSON" "$ARCH" "$PRIVATE_IP")
-  echo "==> First-time register"
-fi
-RESP=$(curl_gw -X POST "$GATEWAY_BASE/api/agent/register" -H 'Content-Type: application/json' -d "$BODY")
-echo "$RESP"
-
-if command -v jq >/dev/null 2>&1; then
-  ASSET_ID=$(echo "$RESP" | jq -r .assetId)
-  AGENT_TOKEN=$(echo "$RESP" | jq -r .agentToken)
-  REUSED=$(echo "$RESP" | jq -r .reused)
-else
-  ASSET_ID=$(echo "$RESP" | sed -n 's/.*"assetId":"\([^"]*\)".*/\1/p')
-  AGENT_TOKEN=$(echo "$RESP" | sed -n 's/.*"agentToken":"\([^"]*\)".*/\1/p')
-  REUSED=$(echo "$RESP" | sed -n 's/.*"reused":\([^,}]*\).*/\1/p')
-fi
-if [ -z "$ASSET_ID" ] || [ "$ASSET_ID" = "null" ]; then
-  echo "ERROR: register failed" >&2
-  exit 1
-fi
-if [ "$REUSED" = "true" ]; then
-  echo "==> Reused existing asset (token refreshed)"
-else
-  echo "==> Registered as new asset"
-fi
-
 # Keep https:// (or http:// for local dev); do not strip scheme.
 GATEWAY_URL=$(printf '%s' "$GATEWAY_BASE" | sed -E 's#/$##')
 TLS_PIN="$GATEWAY_TLS_SPKI_SHA256"
@@ -315,10 +233,10 @@ upsert_yaml_quoted() {
   esc=$(printf '%s' "$value" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g')
   line="${key}: \"${esc}\""
   tmp=$(mktemp)
-  if grep -qE "^[[:space:]]*${key}:" "$file"; then
+  if grep -qE "^${key}:" "$file"; then
     LINE="$line" KEY="$key" awk '
       BEGIN { line=ENVIRON["LINE"]; key=ENVIRON["KEY"]; done=0 }
-      $0 ~ "^[[:space:]]*" key ":" {
+      $0 ~ "^" key ":" {
         if (!done) { print line; done=1; next }
       }
       { print }
@@ -327,7 +245,7 @@ upsert_yaml_quoted() {
   else
     LINE="$line" awk '
       BEGIN { line=ENVIRON["LINE"]; done=0 }
-      /^[[:space:]]*gatewayTlsSpkiSha256:/ { print; if (!done) { print line; done=1 }; next }
+      /^gatewayTlsSpkiSha256:/ { print; if (!done) { print line; done=1 }; next }
       { print }
       END { if (!done) print line }
     ' "$file" > "$tmp"
@@ -339,13 +257,13 @@ upsert_yaml_quoted() {
 write_agent_yaml() {
   if [ -f "$CONF_DIR/agent.yaml" ]; then
     tmp=$(mktemp)
-    if grep -qE '^[[:space:]]*gateway:' "$CONF_DIR/agent.yaml"; then
-      sed -E 's|^[[:space:]]*gateway:.*|gateway: "'"$GATEWAY_URL"'"|' "$CONF_DIR/agent.yaml" > "$tmp"
+    if grep -qE '^gateway:' "$CONF_DIR/agent.yaml"; then
+      sed -E 's|^gateway:.*|gateway: "'"$GATEWAY_URL"'"|' "$CONF_DIR/agent.yaml" > "$tmp"
     else
       { printf 'gateway: "%s"\n' "$GATEWAY_URL"; cat "$CONF_DIR/agent.yaml"; } > "$tmp"
     fi
-    if grep -qE '^[[:space:]]*gatewayTlsSpkiSha256:' "$tmp"; then
-      sed -E 's|^[[:space:]]*gatewayTlsSpkiSha256:.*|gatewayTlsSpkiSha256: "'"$TLS_PIN"'"|' "$tmp" > "${tmp}.2"
+    if grep -qE '^gatewayTlsSpkiSha256:' "$tmp"; then
+      sed -E 's|^gatewayTlsSpkiSha256:.*|gatewayTlsSpkiSha256: "'"$TLS_PIN"'"|' "$tmp" > "${tmp}.2"
       mv -f "${tmp}.2" "$tmp"
     else
       printf 'gatewayTlsSpkiSha256: "%s"\n' "$TLS_PIN" >> "$tmp"
@@ -367,9 +285,17 @@ YAML
 }
 write_agent_yaml
 
-printf '%s\n' "$ASSET_ID" > "$CONF_DIR/asset-id"
-printf '%s\n' "$AGENT_TOKEN" > "$CONF_DIR/agent-token"
-chmod 600 "$CONF_DIR/asset-id" "$CONF_DIR/agent-token" 2>/dev/null || true
+# Agent bootstrap owns registration and credential replacement. Publish the code
+# only after agent.yaml is final, so a starting Agent cannot observe stale config.
+write_install_code() {
+  local tmp
+  tmp=$(mktemp "$CONF_DIR/.install-code.XXXXXX")
+  chmod 0600 "$tmp"
+  printf '%s\n' "$INSTALL_CODE" > "$tmp"
+  mv -f "$tmp" "$CONF_DIR/install-code"
+  chmod 0600 "$CONF_DIR/install-code"
+}
+write_install_code
 
 install_systemd_unit() {
   cat > /etc/systemd/system/woops-agent.service <<UNIT
@@ -496,6 +422,24 @@ else
   stop_agent_procs || true
   sleep 1
   start_agent
+  echo "==> Waiting up to 60s for Agent bootstrap registration..."
+  registered=0
+  for ((attempt=0; attempt<60; attempt++)); do
+    if [ -s "$CONF_DIR/asset-id" ] && [ -s "$CONF_DIR/agent-token" ] && [ ! -e "$CONF_DIR/install-code" ]; then
+      registered=1
+      break
+    fi
+    sleep 1
+  done
+  if [ "$registered" != "1" ]; then
+    echo "ERROR: Agent registration did not complete within 60s." >&2
+    echo "       Check service state and /var/log/woops-agent/woops-agent.log; credentials were not printed." >&2
+    if has_systemd; then
+      systemctl is-active woops-agent 2>/dev/null || true
+    fi
+    exit 1
+  fi
+  echo "==> Agent registered successfully."
   if has_systemd; then
     echo "    Restart later: systemctl restart woops-agent"
   fi

@@ -39,8 +39,8 @@ func TestRenderLinux(t *testing.T) {
 	if !strings.Contains(out, `AGENT_SHA256_AMD64="deadbeef"`) {
 		t.Fatal("missing agent sha256")
 	}
-	if !strings.Contains(out, "$GATEWAY_BASE/api/agent/register") {
-		t.Fatal("register should use GATEWAY_BASE")
+	if strings.Contains(out, "/api/agent/register") || strings.Contains(out, "BODY=") || strings.Contains(out, "AGENT_TOKEN=") {
+		t.Fatal("installer must delegate registration and credential writes to Agent bootstrap")
 	}
 	if !strings.Contains(out, "proxy:") || !strings.Contains(out, "allowGlobal") {
 		t.Fatal("expected proxy comment block in injected agent.yaml template")
@@ -54,14 +54,14 @@ func TestRenderLinux(t *testing.T) {
 	if !strings.Contains(out, "gatewayProxy") || !strings.Contains(out, "detect_gateway_proxy_env") {
 		t.Fatal("expected gatewayProxy persist from https_proxy env")
 	}
+	if !strings.Contains(out, "grep -qE '^gateway:'") || strings.Contains(out, "grep -qE '^[[:space:]]*gateway:'") {
+		t.Fatal("Linux reinstall must update only top-level gateway and preserve nested proxyBridge keys")
+	}
 	if !strings.Contains(out, "/etc/woops-agent") || !strings.Contains(out, "woops-agent.service") {
 		t.Fatal("expected woops-agent paths in install.sh")
 	}
 	if strings.Contains(out, "/etc/ops-agent") || strings.Contains(out, "remove_legacy") || strings.Contains(out, "disable --now ops-agent") || strings.Contains(out, "pkill -9 -x ops-agent") {
 		t.Fatal("legacy ops-agent migration must be removed from install.sh")
-	}
-	if !strings.Contains(out, "detect_hostname") || !strings.Contains(out, "/proc/sys/kernel/hostname") {
-		t.Fatal("expected hostname fallbacks for minimal Linux (no hostname(1))")
 	}
 	if !strings.Contains(out, "need_staged_swap") || !strings.Contains(out, "final path was free") {
 		t.Fatal("expected staged-swap only when woops-agent binary path is busy")
@@ -80,6 +80,22 @@ func TestRenderLinux(t *testing.T) {
 	}
 	if strings.Contains(out, "%%s") {
 		t.Fatal("legacy Sprintf %% escapes should not remain")
+	}
+	configAt := strings.Index(out, "write_agent_yaml\n")
+	codeAt := strings.Index(out, "write_install_code\n")
+	startAt := strings.Index(out, `echo "==> Starting woops-agent`)
+	if configAt < 0 || codeAt < 0 || startAt < 0 || !(configAt < codeAt && codeAt < startAt) {
+		t.Fatal("agent.yaml must be published before install-code and cold start")
+	}
+	if !strings.Contains(out, `chmod 0600 "$CONF_DIR/install-code"`) {
+		t.Fatal("Linux install-code must be mode 0600")
+	}
+	if !strings.Contains(out, "Waiting up to 60s for Agent bootstrap registration") ||
+		!strings.Contains(out, `[ ! -e "$CONF_DIR/install-code" ]`) {
+		t.Fatal("cold install must wait for credentials and consumed install-code")
+	}
+	if strings.Index(out, "Update staged (version") > strings.Index(out, "Waiting up to 60s for Agent bootstrap registration") {
+		t.Fatal("live update must return without entering cold registration wait")
 	}
 }
 
@@ -100,8 +116,10 @@ func TestRenderWindows(t *testing.T) {
 	if !strings.Contains(out, `$InstallCode = 'CODE123'`) {
 		t.Fatal("missing InstallCode")
 	}
-	if !strings.Contains(out, `"$GatewayBase/api/agent/register"`) {
-		t.Fatal("register should use GatewayBase")
+	if strings.Contains(out, "/api/agent/register") || strings.Contains(out, "Invoke-RestMethod -Method Post") ||
+		strings.Contains(out, "$Resp.agentToken") || strings.Contains(out, "$Resp.assetId") ||
+		strings.Contains(out, "Set-Content -Path (Join-Path $ConfDir 'agent-token')") {
+		t.Fatal("PowerShell installer must delegate registration and credential writes to Agent bootstrap")
 	}
 	if strings.Contains(out, "{{AGENT_YAML_TEMPLATE}}") || strings.Contains(out, "{{AGENT_YAML_TEMPLATE_B64}}") {
 		t.Fatal("agent.yaml template placeholders not replaced")
@@ -137,6 +155,9 @@ func TestRenderWindows(t *testing.T) {
 	if !strings.Contains(out, "gatewayProxy") || !strings.Contains(out, "Get-InstallGatewayProxy") {
 		t.Fatal("expected Windows gatewayProxy persist from https_proxy env")
 	}
+	if !strings.Contains(out, "-match '^gateway:'") || strings.Contains(out, "-match '^\\s*gateway:'") {
+		t.Fatal("PowerShell reinstall must update only top-level gateway and preserve nested proxyBridge keys")
+	}
 	if !strings.Contains(out, "curl.exe") {
 		t.Fatal("expected curl.exe for Windows TLS pin downloads")
 	}
@@ -151,6 +172,26 @@ func TestRenderWindows(t *testing.T) {
 	}
 	if strings.Contains(out, "throw @\"") || strings.Contains(out, "throw @'") {
 		t.Fatal("install.ps1 must not use throw here-strings (PS 5.1 ANSI decode breaks UTF-8)")
+	}
+	configAt := strings.Index(out, "$GwProxy = Get-InstallGatewayProxy")
+	codeAt := strings.Index(out, "$InstallCodePath = Join-Path $ConfDir 'install-code'")
+	serviceAt := strings.Index(out, `$BinPathName = '"' + $Bin`)
+	if configAt < 0 || codeAt < 0 || serviceAt < 0 || !(configAt < codeAt && codeAt < serviceAt) {
+		t.Fatal("agent.yaml must be updated before install-code and service setup")
+	}
+	if !strings.Contains(out, "Set-AtomicContent") || !strings.Contains(out, "[System.IO.File]::Replace") {
+		t.Fatal("PowerShell config/install-code writes must use same-volume atomic replacement")
+	}
+	if !strings.Contains(out, "/inheritance:r") || !strings.Contains(out, "*S-1-5-18:F") ||
+		!strings.Contains(out, "*S-1-5-32-544:F") {
+		t.Fatal("install-code ACL must be restricted to SYSTEM and Administrators")
+	}
+	if !strings.Contains(out, "Waiting up to 60s for Agent bootstrap registration") ||
+		!strings.Contains(out, "-not (Test-Path -LiteralPath $InstallCodePath)") {
+		t.Fatal("cold install must wait for credentials and consumed install-code")
+	}
+	if strings.Index(out, "Update staged (version") > strings.Index(out, "Waiting up to 60s for Agent bootstrap registration") {
+		t.Fatal("registration wait must remain in the non-live branch")
 	}
 }
 
@@ -187,15 +228,12 @@ func TestRenderWindowsBat(t *testing.T) {
 		!strings.Contains(out, `restart-update.bat`) {
 		t.Fatal("install.bat must stage a detached live update")
 	}
-	if !strings.Contains(out, `echo gateway: "%GATEWAY%"`) ||
-		strings.Contains(out, `findstr /V /C:"gateway:"`) {
-		t.Fatal("install.bat must rewrite agent.yaml in ASCII without merging UTF-8 content")
+	if !strings.Contains(out, `if not exist "%CFG%" (`) ||
+		!strings.Contains(out, "Existing agent.yaml preserved ^(including proxyBridge^)") {
+		t.Fatal("legacy BAT must preserve an existing config, including proxyBridge")
 	}
-	if !strings.Contains(out, `set /p "EXISTING_ID="<"%ID_FILE%"`) {
-		t.Fatal("reinstall must reliably read and reuse the persisted asset-id")
-	}
-	if strings.Contains(out, `EXISTING_ID:~36`) {
-		t.Fatal("installer must not silently discard an existing identity using fragile length checks")
+	if strings.Contains(out, `>"%CFG%" (`) || strings.Contains(out, `findstr /V /C:"gateway:"`) {
+		t.Fatal("legacy BAT must not rewrite or merge an existing YAML file")
 	}
 	if !strings.Contains(out, `echo [ERROR] Service start failed`) {
 		t.Fatal("manual install must report service start failures")
@@ -206,10 +244,27 @@ func TestRenderWindowsBat(t *testing.T) {
 	if !strings.Contains(out, "\r\n") {
 		t.Fatal("install.bat must use CRLF line endings for legacy cmd")
 	}
-	if strings.Contains(out, `echo:!AGENT_TOKEN!"`) {
-		t.Fatal("install.bat must not append a quote to agent-token")
+	if strings.Contains(out, "/api/agent/register") || strings.Contains(out, "register.json") ||
+		strings.Contains(out, "ParseRegisterResp") || strings.Contains(out, `>"%TOKEN_FILE%"`) ||
+		strings.Contains(out, `>"%ID_FILE%"`) {
+		t.Fatal("legacy BAT must delegate registration and credential writes to Agent bootstrap")
 	}
-	if !strings.Contains(out, `echo:!AGENT_TOKEN!`) {
-		t.Fatal("install.bat must persist agent-token")
+	configAt := strings.Index(out, `if not exist "%CFG%" (`)
+	codeAt := strings.Index(out, `set "CODE_TMP=%CONF_DIR%\install-code.tmp"`)
+	serviceAt := strings.Index(out, `set "BINPATH=`)
+	if configAt < 0 || codeAt < 0 || serviceAt < 0 || !(configAt < codeAt && codeAt < serviceAt) {
+		t.Fatal("BAT must publish config before install-code and service setup")
+	}
+	if !strings.Contains(out, `move /Y "!CODE_TMP!" "%CODE_FILE%"`) ||
+		!strings.Contains(out, `icacls "%CODE_FILE%" /inheritance:r`) {
+		t.Fatal("BAT must safely publish and restrict install-code")
+	}
+	if !strings.Contains(out, "Waiting up to 60s for Agent bootstrap registration") ||
+		!strings.Contains(out, `if defined WAIT_ID if defined WAIT_TOKEN if not exist "%CODE_FILE%"`) {
+		t.Fatal("cold BAT install must wait for credentials and consumed install-code")
+	}
+	if strings.Index(out, "Update staged; service restart scheduled") >
+		strings.Index(out, "Waiting up to 60s for Agent bootstrap registration") {
+		t.Fatal("live BAT update must return before the cold registration wait")
 	}
 }

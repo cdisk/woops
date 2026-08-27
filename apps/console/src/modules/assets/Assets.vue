@@ -124,6 +124,14 @@
           </template>
         </span>
       </p>
+      <div v-if="installCode" class="install-block">
+        <div class="install-label">{{ t('assets.installCode') }}</div>
+        <p class="install-code-hint">{{ t('assets.installCodeHint') }}</p>
+        <el-input type="textarea" :rows="2" v-model="installCode" readonly />
+        <el-button size="small" class="copy-btn" @click="copyText(installCode)">
+          {{ t('common.copy') }}
+        </el-button>
+      </div>
       <div class="install-block">
         <div class="install-label">Linux</div>
         <el-input type="textarea" :rows="3" v-model="installCurl" readonly />
@@ -220,6 +228,7 @@ const detailAssetId = ref('')
 const installLoading = ref(false)
 const installVisible = ref(false)
 const installGroupName = ref('')
+const installCode = ref('')
 const installCurl = ref('')
 const installPowershell = ref('')
 const installCmd = ref('')
@@ -266,6 +275,7 @@ function stopInstallCountdown() {
 function onInstallClosed() {
   stopInstallCountdown()
   installExpiresAt.value = null
+  installCode.value = ''
 }
 
 const selectionLabel = computed(() => {
@@ -372,6 +382,7 @@ async function openInstall() {
   try {
     const { data } = await api.post('/install-codes', { groupId: selectedKey.value })
     installGroupName.value = node.name || node.label || ''
+    installCode.value = data.code || ''
     installCurl.value = data.curl || ''
     installPowershell.value = data.powershell || ''
     installCmd.value = data.cmd || ''
@@ -468,6 +479,7 @@ onBeforeUnmount(() => {
 .install-ttl.expired { color: var(--ops-danger); font-weight: 700; }
 .install-block { margin-bottom: 16px; }
 .install-label { font-weight: 600; margin-bottom: 6px; }
+.install-code-hint { margin: 0 0 8px; font-size: 13px; color: var(--ops-text-secondary); line-height: 1.5; }
 .copy-btn { margin-top: 8px; }
 .install-curl-tip {
   margin-top: 10px;

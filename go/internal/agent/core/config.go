@@ -34,8 +34,12 @@ type Config struct {
 	MetricsInterval time.Duration
 	// ProxyRaw is the optional proxy: YAML subtree for the proxy plugin (soft-fail).
 	ProxyRaw []byte
+	// ProxyBridgeRaw is the independent proxyBridge: YAML subtree.
+	ProxyBridgeRaw []byte
 	// ConfigPath is the agent.yaml path (for local log file placement).
 	ConfigPath string
+	// AgentVersion is injected by cmd/agent at startup.
+	AgentVersion string
 }
 
 type fileConfig struct {
@@ -83,6 +87,11 @@ func LoadConfig(path string) (Config, error) {
 		log.Printf("proxy plugin: extract config: %v", err)
 	} else {
 		cfg.ProxyRaw = raw
+	}
+	if raw, err := extractMapping(b, "proxyBridge"); err != nil {
+		log.Printf("proxy bridge plugin: extract config: %v", err)
+	} else {
+		cfg.ProxyBridgeRaw = raw
 	}
 	if err := cfg.normalize(); err != nil {
 		return Config{}, err
@@ -140,9 +149,6 @@ func (c *Config) ReloadCredentials() error {
 func (c *Config) normalize() error {
 	if c.Gateway == "" {
 		return fmt.Errorf("gateway required in agent.yaml")
-	}
-	if c.AssetID == "" || c.AgentToken == "" {
-		return fmt.Errorf("missing asset-id or agent-token beside agent.yaml")
 	}
 	pin, err := tlsutil.NormalizeSPKIPin(c.GatewayTLSSpkiSHA256)
 	if err != nil {

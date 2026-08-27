@@ -38,6 +38,7 @@ func loadAndRun(cfgPath string, ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	cfg.AgentVersion = Version
 	log.Printf("woops-agent %s starting asset=%s", Version, cfg.AssetID)
 	rt, err := app.New(cfg)
 	if err != nil {

@@ -15,10 +15,9 @@ set "BIN_NEW=%BIN_DIR%\woops-agent-new.exe"
 set "CFG=%CONF_DIR%\agent.yaml"
 set "ID_FILE=%CONF_DIR%\asset-id"
 set "TOKEN_FILE=%CONF_DIR%\agent-token"
+set "CODE_FILE=%CONF_DIR%\install-code"
 set "SVC=woops-agent"
 set "TEMP_DIR=%CONF_DIR%\install-temp"
-set "BODY_FILE=%TEMP_DIR%\register.json"
-set "RESP_FILE=%TEMP_DIR%\register.resp"
 set "AGENT_URL=%GATEWAY%/i/%INSTALL_CODE%/agent/windows/amd64"
 
 net session >nul 2>&1
@@ -44,7 +43,6 @@ if "%LIVE%"=="1" echo ==^> Live update: staging files before service restart
 
 echo ==^> Gateway: %GATEWAY%
 echo ==^> Download agent...
-if exist "%RESP_FILE%" del /f /q "%RESP_FILE%" >nul 2>&1
 if "%TLS_PIN%"=="" (
   curl.exe -fsSL -o "%TEMP_DIR%\woops-agent.exe" "%AGENT_URL%"
 ) else (
@@ -87,13 +85,6 @@ if not defined AGENT_VER (
 )
 echo ==^> Version: !AGENT_VER!
 
-set "HOSTNAME=%COMPUTERNAME%"
-set "OS_LABEL=Windows"
-for /f "tokens=1,* delims==" %%a in ('wmic os get Caption /value 2^>nul ^| findstr /B "Caption="') do set "OS_LABEL=%%b"
-set "OS_LABEL=!OS_LABEL: =!"
-if "!OS_LABEL!"=="" set "OS_LABEL=Windows"
-echo ==^> OS: !OS_LABEL!
-
 set "BUILD=0"
 for /f "tokens=1,* delims==" %%a in ('wmic os get BuildNumber /value 2^>nul ^| findstr /B "BuildNumber="') do set "BUILD=%%b"
 if defined BUILD if !BUILD! LSS 17763 (
@@ -111,65 +102,46 @@ if defined BUILD if !BUILD! LSS 17763 (
   )
 )
 
-set "EXISTING_ID="
-if exist "%ID_FILE%" (
-  set /p "EXISTING_ID="<"%ID_FILE%"
-  set "EXISTING_ID=!EXISTING_ID: =!"
-  set "EXISTING_ID=!EXISTING_ID:"=!"
-)
-if defined EXISTING_ID (
-  echo ==^> Re-register assetId=!EXISTING_ID!
+REM Existing YAML may contain nested proxy/proxyBridge settings. Pure legacy cmd
+REM cannot safely edit arbitrary YAML/UTF-8, so preserve it byte-for-byte.
+REM Gateway/pin refresh is intentionally skipped for existing config.
+if not exist "%CFG%" (
+  set "CFG_TMP=%CONF_DIR%\agent.yaml.tmp"
+  >"!CFG_TMP!" (
+    echo gateway: "%GATEWAY%"
+    echo gatewayTlsSpkiSha256: "%TLS_PIN%"
+    echo.
+    echo metrics:
+    echo   enabled: false
+  )
+  move /Y "!CFG_TMP!" "%CFG%" >nul
+  if errorlevel 1 (
+    echo [ERROR] Cannot publish agent.yaml
+    exit /b 1
+  )
 ) else (
-  echo ==^> First-time register
+  echo ==^> Existing agent.yaml preserved ^(including proxyBridge^)
 )
 
-set "REG_VER=!AGENT_VER!"
-set "REG_HOST=!HOSTNAME!"
-set "REG_OS=!OS_LABEL!"
-set "REG_AID=!EXISTING_ID!"
-setlocal DisableDelayedExpansion
-if defined REG_AID (
-  >"%BODY_FILE%" echo {"installCode":"%INSTALL_CODE%","assetId":"%REG_AID%","agentVersion":"%REG_VER%","hostname":"%REG_HOST%","os":"%REG_OS%","arch":"amd64"}
-) else (
-  >"%BODY_FILE%" echo {"installCode":"%INSTALL_CODE%","agentVersion":"%REG_VER%","hostname":"%REG_HOST%","os":"%REG_OS%","arch":"amd64"}
-)
-endlocal
-
-echo ==^> Register...
-if "%TLS_PIN%"=="" (
-  curl.exe -fsSL -X POST -H "Content-Type: application/json" --data-binary "@%BODY_FILE%" -o "%RESP_FILE%" "%GATEWAY%/api/agent/register"
-) else (
-  curl.exe -fsSL -k --pinnedpubkey "%CURL_PIN%" -X POST -H "Content-Type: application/json" --data-binary "@%BODY_FILE%" -o "%RESP_FILE%" "%GATEWAY%/api/agent/register"
-)
+REM Publish install-code only after agent.yaml. Agent performs registration and
+REM atomically replaces credentials; existing asset-id and agent-token stay intact.
+set "CODE_TMP=%CONF_DIR%\install-code.tmp"
+>"!CODE_TMP!" echo %INSTALL_CODE%
+icacls "!CODE_TMP!" /inheritance:r /grant:r "*S-1-5-18:F" "*S-1-5-32-544:F" >nul 2>&1
 if errorlevel 1 (
-  echo [ERROR] Register failed
-  if exist "%RESP_FILE%" type "%RESP_FILE%"
+  del /f /q "!CODE_TMP!" >nul 2>&1
+  echo [ERROR] Cannot restrict temporary install-code ACL
   exit /b 1
 )
-type "%RESP_FILE%"
-echo.
-
-findstr /C:"assetId" "%RESP_FILE%" >nul 2>&1
+move /Y "!CODE_TMP!" "%CODE_FILE%" >nul
 if errorlevel 1 (
-  echo [ERROR] Register response invalid
+  echo [ERROR] Cannot publish install-code
   exit /b 1
 )
-
-call :ParseRegisterResp
+icacls "%CODE_FILE%" /inheritance:r /grant:r "*S-1-5-18:F" "*S-1-5-32-544:F" >nul 2>&1
 if errorlevel 1 (
-  echo [ERROR] Parse register response failed
+  echo [ERROR] Cannot restrict install-code ACL
   exit /b 1
-)
-echo ==^> assetId=!ASSET_ID!
-
-REM Always rewrite minimal agent.yaml (ASCII). Do not merge UTF-8/BOM content from install.ps1.
-REM findstr append leaves a BOM on line 3 and breaks the Go yaml parser.
->"%CFG%" (
-  echo gateway: "%GATEWAY%"
-  echo gatewayTlsSpkiSha256: "%TLS_PIN%"
-  echo.
-  echo metrics:
-  echo   enabled: false
 )
 
 set "BINPATH=\"%BIN%\" -config \"%CFG%\""
@@ -205,24 +177,25 @@ if errorlevel 1 (
   exit /b 1
 )
 echo ==^> Service started
-echo [OK] Done. Log: %CONF_DIR%\woops-agent.log
+echo ==^> Waiting up to 60s for Agent bootstrap registration...
+set /a WAIT_COUNT=0
+:wait_register
+set "WAIT_ID="
+set "WAIT_TOKEN="
+if exist "%ID_FILE%" set /p "WAIT_ID="<"%ID_FILE%"
+if exist "%TOKEN_FILE%" set /p "WAIT_TOKEN="<"%TOKEN_FILE%"
+if defined WAIT_ID if defined WAIT_TOKEN if not exist "%CODE_FILE%" goto :registered
+set /a WAIT_COUNT+=1
+if !WAIT_COUNT! GEQ 60 goto :register_timeout
+ping -n 2 127.0.0.1 >nul
+goto :wait_register
+
+:registered
+echo [OK] Agent registered successfully. Log: %CONF_DIR%\woops-agent.log
 exit /b 0
 
-:ParseRegisterResp
-set "LINE="
-for /f "usebackq delims=" %%a in ("%RESP_FILE%") do set "LINE=%%a"
-set "ASSET_ID="
-set "AGENT_TOKEN="
-set "TMP=!LINE:*"assetId":"=!"
-if not "!TMP!"=="!LINE!" for /f "tokens=1 delims=," %%a in ("!TMP!") do set "ASSET_ID=%%~a"
-set "ASSET_ID=!ASSET_ID:"=!"
-set "ASSET_ID=!ASSET_ID:}=!"
-set "TMP=!LINE:*"agentToken":"=!"
-if not "!TMP!"=="!LINE!" for /f "tokens=1 delims=," %%a in ("!TMP!") do set "AGENT_TOKEN=%%~a"
-set "AGENT_TOKEN=!AGENT_TOKEN:"=!"
-set "AGENT_TOKEN=!AGENT_TOKEN:}=!"
-if "!ASSET_ID!"=="" exit /b 1
-if "!AGENT_TOKEN!"=="" exit /b 1
-> "%ID_FILE%" echo:!ASSET_ID!
-> "%TOKEN_FILE%" echo:!AGENT_TOKEN!
-exit /b 0
+:register_timeout
+echo [ERROR] Agent registration did not complete within 60s.
+echo Check service state and %CONF_DIR%\woops-agent.log. Credentials were not printed.
+sc query "%SVC%"
+exit /b 1

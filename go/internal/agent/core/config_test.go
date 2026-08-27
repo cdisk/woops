@@ -79,6 +79,21 @@ func TestLoadConfigCredFiles(t *testing.T) {
 	}
 }
 
+func TestLoadConfigAllowsMissingCredentials(t *testing.T) {
+	dir := t.TempDir()
+	yamlPath := filepath.Join(dir, "agent.yaml")
+	if err := os.WriteFile(yamlPath, []byte("gateway: 127.0.0.1:9200\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(yamlPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AssetID != "" || cfg.AgentToken != "" {
+		t.Fatalf("unexpected credentials asset=%q token=%q", cfg.AssetID, cfg.AgentToken)
+	}
+}
+
 func TestReloadCredentials(t *testing.T) {
 	dir := t.TempDir()
 	yamlPath := filepath.Join(dir, "agent.yaml")
@@ -172,5 +187,36 @@ proxy:
 	}
 	if cfg.ControlWS == "" {
 		t.Fatal("core ws paths required")
+	}
+}
+
+func TestLoadConfigExtractsIndependentProxyBridge(t *testing.T) {
+	dir := t.TempDir()
+	yamlPath := filepath.Join(dir, "agent.yaml")
+	content := `
+gateway: 127.0.0.1:9200
+proxy:
+  enabled: false
+proxyBridge:
+  enabled: true
+  targets:
+    - address: 10.0.0.2:3130
+      key: 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+`
+	if err := os.WriteFile(yamlPath, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "asset-id"), []byte("id-1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "agent-token"), []byte("tok-1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadConfig(yamlPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.ProxyRaw) == 0 || len(cfg.ProxyBridgeRaw) == 0 {
+		t.Fatalf("proxy=%q bridge=%q", cfg.ProxyRaw, cfg.ProxyBridgeRaw)
 	}
 }

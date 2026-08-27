@@ -6,6 +6,7 @@ require (
 	github.com/UserExistsError/conpty v0.1.4
 	github.com/creack/pty v1.1.23
 	github.com/gorilla/websocket v1.5.3
+	github.com/hashicorp/yamux v0.1.2
 	github.com/iamacarpet/go-winpty v1.0.4
 	github.com/shirou/gopsutil/v4 v4.25.1
 	golang.org/x/sys v0.28.0

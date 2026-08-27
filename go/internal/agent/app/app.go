@@ -22,7 +22,8 @@ type buildContext struct {
 	services     core.Services
 	sessions     *sessionreg.Registry
 	controls     []controlRegistration
-	background   []core.BackgroundStarter
+	preAuth      []core.BackgroundStarter
+	postAuth     []core.BackgroundStarter
 	onDisconnect []func()
 }
 
@@ -54,7 +55,11 @@ func (ctx *buildContext) registerControl(wire controlRegistration) {
 }
 
 func (ctx *buildContext) registerBackground(start func(context.Context)) {
-	ctx.background = append(ctx.background, start)
+	ctx.postAuth = append(ctx.postAuth, start)
+}
+
+func (ctx *buildContext) registerPreAuthBackground(start func(context.Context)) {
+	ctx.preAuth = append(ctx.preAuth, start)
 }
 
 func (ctx *buildContext) registerDisconnect(hook func()) {
@@ -97,7 +102,8 @@ func New(cfg Config) (*core.Runtime, error) {
 		return core.Dependencies{
 			Sessions:            ctx.sessions,
 			Controls:            controls,
-			Background:          ctx.background,
+			PreAuthBackground:   ctx.preAuth,
+			Background:          ctx.postAuth,
 			OnControlDisconnect: disconnect,
 		}
 	})

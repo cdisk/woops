@@ -25,6 +25,34 @@ func proxyDialAddr(u *url.URL) string {
 	return net.JoinHostPort(host, port)
 }
 
+func sameListenAddress(upstream *url.URL, listen string) bool {
+	if upstream == nil {
+		return false
+	}
+	lh, lp, err := net.SplitHostPort(strings.TrimSpace(listen))
+	if err != nil {
+		return false
+	}
+	uh, up, err := net.SplitHostPort(proxyDialAddr(upstream))
+	if err != nil || lp != up {
+		return false
+	}
+	if strings.EqualFold(lh, uh) {
+		return true
+	}
+	if strings.EqualFold(lh, "localhost") {
+		lh = "127.0.0.1"
+	}
+	if strings.EqualFold(uh, "localhost") {
+		uh = "127.0.0.1"
+	}
+	lip, uip := net.ParseIP(lh), net.ParseIP(uh)
+	if lip != nil && lip.IsUnspecified() && uip != nil && uip.IsLoopback() {
+		return true
+	}
+	return lip != nil && uip != nil && lip.IsLoopback() && uip.IsLoopback()
+}
+
 // dialViaUpstreamCONNECT opens TCP to upstream HTTP proxy and issues CONNECT to dest.
 func dialViaUpstreamCONNECT(upstream *url.URL, destHost string, destPort int) (net.Conn, error) {
 	if upstream == nil {

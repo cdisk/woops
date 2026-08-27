@@ -83,6 +83,13 @@ func isBlockedIP(ip net.IP) bool {
 		if ip4[0] == 169 && ip4[1] == 254 {
 			return true
 		}
+		// Alibaba Cloud instance metadata is outside link-local space.
+		if ip4[0] == 100 && ip4[1] == 100 && ip4[2] == 100 && ip4[3] == 200 {
+			return true
+		}
+	}
+	if ip.Equal(net.ParseIP("fd00:ec2::254")) {
+		return true
 	}
 	return false
 }

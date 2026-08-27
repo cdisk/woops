@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"bufio"
 	"context"
 	"encoding/base64"
 	"fmt"
@@ -20,13 +21,20 @@ import (
 const dialTimeout = 15 * time.Second
 
 type handler struct {
-	cfg      Config
-	ops      opsTarget
-	upstream *url.URL // optional: chain CONNECT/forward via gatewayProxy
-	log      *log.Logger
+	cfg          Config
+	ops          opsTarget
+	upstream     *url.URL // optional: chain CONNECT/forward via gatewayProxy
+	parent       *carrierPool
+	bridgeEntry  bool
+	upstreamSelf bool
+	log          *log.Logger
 }
 
 func serve(ctx context.Context, cfg Config, serverAddr string, upstream *url.URL, plog *log.Logger) error {
+	return serveWithCarrier(ctx, cfg, serverAddr, upstream, nil, plog)
+}
+
+func serveWithCarrier(ctx context.Context, cfg Config, serverAddr string, upstream *url.URL, parent *carrierPool, plog *log.Logger) error {
 	if plog == nil {
 		plog = discardLogger()
 	}
@@ -45,7 +53,14 @@ func serve(ctx context.Context, cfg Config, serverAddr string, upstream *url.URL
 		plog.Printf("proxy listening listen=%s allowGlobal=%v", cfg.Listen, cfg.AllowGlobal)
 	}
 
-	h := &handler{cfg: cfg, ops: ops, upstream: upstream, log: plog}
+	h := &handler{
+		cfg:          cfg,
+		ops:          ops,
+		upstream:     upstream,
+		parent:       parent,
+		upstreamSelf: sameListenAddress(upstream, cfg.Listen),
+		log:          plog,
+	}
 	srv := &http.Server{
 		Handler:           h,
 		ReadHeaderTimeout: 10 * time.Second,
@@ -76,13 +91,13 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	client := clientIPString(r.RemoteAddr)
 	start := time.Now()
 
-	if !h.cfg.clientAllowed(remoteIP(r.RemoteAddr)) {
+	if !h.bridgeEntry && !h.cfg.clientAllowed(remoteIP(r.RemoteAddr)) {
 		h.log.Printf("proxy FAIL method=%s client=%s target=- status=403 reason=cidr_denied durationMs=%d",
 			r.Method, client, elapsedMs(start))
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
-	if !h.checkAuth(r) {
+	if !h.bridgeEntry && !h.checkAuth(r) {
 		h.log.Printf("proxy FAIL method=%s client=%s target=- status=407 reason=auth_required durationMs=%d",
 			r.Method, client, elapsedMs(start))
 		w.Header().Set("Proxy-Authenticate", `Basic realm="woops-agent-proxy"`)
@@ -125,6 +140,23 @@ func (h *handler) handleConnect(w http.ResponseWriter, r *http.Request, client s
 	target := net.JoinHostPort(host, strconv.Itoa(port))
 	h.log.Printf("proxy START method=CONNECT client=%s target=%s", client, target)
 
+	if err := h.cfg.authorizeDest(host, port, h.ops); err != nil {
+		h.log.Printf("proxy FAIL method=CONNECT client=%s target=%s status=403 reason=dest_not_allowed durationMs=%d",
+			client, target, elapsedMs(start))
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if h.parent != nil && h.parent.available() {
+		h.handleConnectCarrier(w, r, client, target, start)
+		return
+	}
+	if h.upstreamSelf && !h.bridgeEntry {
+		h.log.Printf("proxy FAIL method=CONNECT client=%s target=%s status=502 reason=parent_unavailable durationMs=%d",
+			client, target, elapsedMs(start))
+		http.Error(w, "bad gateway", http.StatusBadGateway)
+		return
+	}
+
 	if sameProxyTarget(h.upstream, host, port) {
 		h.log.Printf("proxy FAIL method=CONNECT client=%s target=%s status=403 reason=upstream_loop durationMs=%d",
 			client, target, elapsedMs(start))
@@ -133,17 +165,11 @@ func (h *handler) handleConnect(w http.ResponseWriter, r *http.Request, client s
 	}
 
 	var up net.Conn
-	if h.upstream != nil {
-		if err := h.cfg.authorizeDest(host, port, h.ops); err != nil {
-			h.log.Printf("proxy FAIL method=CONNECT client=%s target=%s status=403 reason=dest_not_allowed durationMs=%d",
-				client, target, elapsedMs(start))
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
+	if h.upstream != nil && !h.upstreamSelf {
 		up, err = dialViaUpstreamCONNECT(h.upstream, host, port)
 		if err != nil {
-			h.log.Printf("proxy FAIL method=CONNECT client=%s target=%s status=502 reason=dial_failed err=%q durationMs=%d",
-				client, target, err.Error(), elapsedMs(start))
+			h.log.Printf("proxy FAIL method=CONNECT client=%s target=%s status=502 reason=dial_failed durationMs=%d",
+				client, target, elapsedMs(start))
 			http.Error(w, "bad gateway", http.StatusBadGateway)
 			return
 		}
@@ -157,8 +183,8 @@ func (h *handler) handleConnect(w http.ResponseWriter, r *http.Request, client s
 		}
 		up, err = net.DialTimeout("tcp", dest, dialTimeout)
 		if err != nil {
-			h.log.Printf("proxy FAIL method=CONNECT client=%s target=%s status=502 reason=dial_failed err=%q durationMs=%d",
-				client, target, err.Error(), elapsedMs(start))
+			h.log.Printf("proxy FAIL method=CONNECT client=%s target=%s status=502 reason=dial_failed durationMs=%d",
+				client, target, elapsedMs(start))
 			http.Error(w, "bad gateway", http.StatusBadGateway)
 			return
 		}
@@ -175,8 +201,8 @@ func (h *handler) handleConnect(w http.ResponseWriter, r *http.Request, client s
 	clientConn, buf, err := hj.Hijack()
 	if err != nil {
 		_ = up.Close()
-		h.log.Printf("proxy FAIL method=CONNECT client=%s target=%s status=500 reason=hijack_failed err=%q durationMs=%d",
-			client, target, err.Error(), elapsedMs(start))
+		h.log.Printf("proxy FAIL method=CONNECT client=%s target=%s status=500 reason=hijack_failed durationMs=%d",
+			client, target, elapsedMs(start))
 		return
 	}
 	_, _ = clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
@@ -184,8 +210,8 @@ func (h *handler) handleConnect(w http.ResponseWriter, r *http.Request, client s
 		if _, err := io.Copy(up, buf); err != nil {
 			_ = up.Close()
 			_ = clientConn.Close()
-			h.log.Printf("proxy FAIL method=CONNECT client=%s target=%s status=502 reason=dial_failed err=%q durationMs=%d",
-				client, target, err.Error(), elapsedMs(start))
+			h.log.Printf("proxy FAIL method=CONNECT client=%s target=%s status=502 reason=dial_failed durationMs=%d",
+				client, target, elapsedMs(start))
 			return
 		}
 	}
@@ -218,6 +244,23 @@ func (h *handler) handleForward(w http.ResponseWriter, r *http.Request, client s
 	target := net.JoinHostPort(host, strconv.Itoa(port))
 	h.log.Printf("proxy START method=%s client=%s target=%s", r.Method, client, target)
 
+	if err := h.cfg.authorizeDest(host, port, h.ops); err != nil {
+		h.log.Printf("proxy FAIL method=%s client=%s target=%s status=403 reason=dest_not_allowed durationMs=%d",
+			r.Method, client, target, elapsedMs(start))
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	if h.parent != nil && h.parent.available() {
+		h.handleForwardCarrier(w, r, client, target, start)
+		return
+	}
+	if h.upstreamSelf && !h.bridgeEntry {
+		h.log.Printf("proxy FAIL method=%s client=%s target=%s status=502 reason=parent_unavailable durationMs=%d",
+			r.Method, client, target, elapsedMs(start))
+		http.Error(w, "bad gateway", http.StatusBadGateway)
+		return
+	}
+
 	if sameProxyTarget(h.upstream, host, port) {
 		h.log.Printf("proxy FAIL method=%s client=%s target=%s status=403 reason=upstream_loop durationMs=%d",
 			r.Method, client, target, elapsedMs(start))
@@ -241,13 +284,7 @@ func (h *handler) handleForward(w http.ResponseWriter, r *http.Request, client s
 		TLSHandshakeTimeout: dialTimeout,
 	}
 
-	if h.upstream != nil {
-		if err := h.cfg.authorizeDest(host, port, h.ops); err != nil {
-			h.log.Printf("proxy FAIL method=%s client=%s target=%s status=403 reason=dest_not_allowed durationMs=%d",
-				r.Method, client, target, elapsedMs(start))
-			http.Error(w, "forbidden", http.StatusForbidden)
-			return
-		}
+	if h.upstream != nil && !h.upstreamSelf {
 		outReq.URL.Host = r.URL.Host
 		if outReq.URL.Host == "" {
 			outReq.URL.Host = net.JoinHostPort(host, strconv.Itoa(port))
@@ -268,8 +305,85 @@ func (h *handler) handleForward(w http.ResponseWriter, r *http.Request, client s
 
 	resp, err := tr.RoundTrip(outReq)
 	if err != nil {
-		h.log.Printf("proxy FAIL method=%s client=%s target=%s status=502 reason=dial_failed err=%q durationMs=%d",
-			r.Method, client, target, err.Error(), elapsedMs(start))
+		h.log.Printf("proxy FAIL method=%s client=%s target=%s status=502 reason=dial_failed durationMs=%d",
+			r.Method, client, target, elapsedMs(start))
+		http.Error(w, "bad gateway", http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+	copyHeader(w.Header(), resp.Header)
+	w.WriteHeader(resp.StatusCode)
+	n, _ := io.Copy(w, resp.Body)
+	h.log.Printf("proxy END method=%s client=%s target=%s status=%d durationMs=%d bytesOut=%d",
+		r.Method, client, target, resp.StatusCode, elapsedMs(start), n)
+}
+
+func (h *handler) handleConnectCarrier(w http.ResponseWriter, r *http.Request, client, target string, start time.Time) {
+	stream, err := h.parent.open()
+	if err != nil {
+		http.Error(w, "bad gateway", http.StatusBadGateway)
+		return
+	}
+	outReq := r.Clone(r.Context())
+	outReq.Header.Del("Proxy-Authorization")
+	outReq.Header.Del("Proxy-Connection")
+	if err := outReq.Write(stream); err != nil {
+		_ = stream.Close()
+		http.Error(w, "bad gateway", http.StatusBadGateway)
+		return
+	}
+	br := bufio.NewReader(stream)
+	resp, err := http.ReadResponse(br, outReq)
+	if err != nil {
+		_ = stream.Close()
+		http.Error(w, "bad gateway", http.StatusBadGateway)
+		return
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		_ = stream.Close()
+		http.Error(w, "bad gateway", http.StatusBadGateway)
+		return
+	}
+	hj, ok := w.(http.Hijacker)
+	if !ok {
+		_ = stream.Close()
+		http.Error(w, "hijack not supported", http.StatusInternalServerError)
+		return
+	}
+	clientConn, buf, err := hj.Hijack()
+	if err != nil {
+		_ = stream.Close()
+		return
+	}
+	_, _ = clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
+	if br.Buffered() > 0 {
+		stream = &bufConn{Conn: stream, r: br}
+	}
+	if buf.Reader.Buffered() > 0 {
+		_, _ = io.Copy(stream, buf)
+	}
+	in, out := relayCounted(clientConn, stream)
+	h.log.Printf("proxy END method=CONNECT client=%s target=%s durationMs=%d bytesIn=%d bytesOut=%d",
+		client, target, elapsedMs(start), in, out)
+}
+
+func (h *handler) handleForwardCarrier(w http.ResponseWriter, r *http.Request, client, target string, start time.Time) {
+	stream, err := h.parent.open()
+	if err != nil {
+		http.Error(w, "bad gateway", http.StatusBadGateway)
+		return
+	}
+	defer stream.Close()
+	outReq := r.Clone(r.Context())
+	outReq.Header.Del("Proxy-Authorization")
+	outReq.Header.Del("Proxy-Connection")
+	if err := outReq.WriteProxy(stream); err != nil {
+		http.Error(w, "bad gateway", http.StatusBadGateway)
+		return
+	}
+	resp, err := http.ReadResponse(bufio.NewReader(stream), outReq)
+	if err != nil {
 		http.Error(w, "bad gateway", http.StatusBadGateway)
 		return
 	}

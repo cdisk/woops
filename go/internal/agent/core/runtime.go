@@ -32,6 +32,7 @@ type Services struct {
 type Dependencies struct {
 	Sessions            *sessionreg.Registry
 	Controls            ControlFactory
+	PreAuthBackground   []BackgroundStarter
 	Background          []BackgroundStarter
 	OnControlDisconnect func()
 }
@@ -43,6 +44,10 @@ type Runtime struct {
 	dialer *websocket.Dialer
 	http   *http.Client
 	deps   Dependencies
+
+	bootstrapPoll time.Duration
+	retryBase     time.Duration
+	retryMax      time.Duration
 }
 
 func New(cfg Config, compose Composer) (*Runtime, error) {
@@ -57,7 +62,14 @@ func New(cfg Config, compose Composer) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	r := &Runtime{cfg: cfg, dialer: d, http: httpClient}
+	r := &Runtime{
+		cfg:           cfg,
+		dialer:        d,
+		http:          httpClient,
+		bootstrapPoll: 30 * time.Second,
+		retryBase:     time.Second,
+		retryMax:      30 * time.Second,
+	}
 	if compose == nil {
 		return nil, fmt.Errorf("agent core composer required")
 	}
@@ -74,11 +86,29 @@ func New(cfg Config, compose Composer) (*Runtime, error) {
 }
 
 func (r *Runtime) Run(ctx context.Context) error {
-	for _, start := range r.deps.Background {
-		if start != nil {
-			go start(ctx)
-		}
+	startBackgrounds(ctx, r.deps.PreAuthBackground)
+	if err := r.bootstrap(ctx); err != nil {
+		return err
 	}
+	startBackgrounds(ctx, r.deps.Background)
+	return r.runControlLoop(ctx)
+}
+
+func startBackgrounds(ctx context.Context, starters []BackgroundStarter) {
+	for _, starter := range starters {
+		if starter == nil {
+			continue
+		}
+		started := make(chan struct{})
+		go func(start BackgroundStarter) {
+			close(started)
+			start(ctx)
+		}(starter)
+		<-started
+	}
+}
+
+func (r *Runtime) runControlLoop(ctx context.Context) error {
 	for {
 		if err := r.runOnce(ctx); err != nil {
 			log.Printf("control ended err=%v", err)

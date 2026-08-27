@@ -15,6 +15,10 @@ RUN VERSION="${OPS_AGENT_VERSION:-$(date +%y%m%d%H%M)}" \
       -ldflags="-s -w -X main.Version=${VERSION}" -trimpath \
       -o /out/woops-agent-linux-amd64 ./cmd/agent \
  && gzip -9 -k /out/woops-agent-linux-amd64 \
+ && CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build \
+      -ldflags="-s -w -X main.Version=${VERSION}" -trimpath \
+      -o /out/woops-agent-linux-arm64 ./cmd/agent \
+ && gzip -9 -k /out/woops-agent-linux-arm64 \
  && echo "Building woopsctl" \
  && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w" \
       -o /out/woopsctl-linux-amd64 ./cmd/woopsctl \
@@ -43,6 +47,7 @@ RUN apk add --no-cache ca-certificates
 WORKDIR /app
 COPY --from=build /out/gateway /app/gateway
 COPY --from=build /out/woops-agent-linux-amd64 /out/woops-agent-linux-amd64.gz \
+                  /out/woops-agent-linux-arm64 /out/woops-agent-linux-arm64.gz \
                   /out/woopsctl-linux-amd64 /out/woopsctl-windows-amd64.exe \
                   /app/bin/
 COPY --from=windows-legacy-build /out/woops-agent-windows-amd64.exe \

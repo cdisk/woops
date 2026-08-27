@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,4 +65,51 @@ func setTestLogDir(t *testing.T, dir string) {
 	t.Helper()
 	applog.SetDirOverrideForTest(dir)
 	t.Cleanup(func() { applog.SetDirOverrideForTest("") })
+}
+
+func TestMalformedBridgeDoesNotStopOrdinaryProxy(t *testing.T) {
+	dir := t.TempDir()
+	setTestLogDir(t, dir)
+	reserved, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := reserved.Addr().String()
+	_ = reserved.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		TryStart(ctx, Deps{
+			Server:     "https://gw.example:9200",
+			ConfigPath: filepath.Join(dir, "agent.yaml"),
+			Raw: []byte(`
+enabled: true
+listen: "` + addr + `"
+username: u
+password: p
+`),
+			BridgeRaw: []byte("enabled: [invalid"),
+		})
+		close(done)
+	}()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		conn, err := net.DialTimeout("tcp", addr, 50*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			<-done
+			t.Fatal("ordinary proxy did not start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("proxy did not stop")
+	}
 }

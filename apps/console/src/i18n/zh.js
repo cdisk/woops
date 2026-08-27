@@ -154,6 +154,8 @@ export default {
     detailTitle: '详情',
     settingsTitle: '资产设置',
     installCommands: '安装命令',
+    installCode: '安装码',
+    installCodeHint: '离线手工安装时写入目标机 /etc/woops-agent/install-code；也可从下方链接 URL 的 /i/{码}/ 段取得。',
     installWindowsCmd: 'Windows（CMD / Win7·Server 2012）',
     registerHint: '服务器将注册/更新到分组「{group}」。',
     installExpired: '安装码已过期，请关闭后重新生成。',

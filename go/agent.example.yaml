@@ -26,3 +26,26 @@ gatewayTlsSpkiSha256: REPLACE_WITH_OPS_GATEWAY_TLS_SPKI_SHA256
 #   #                 + 其端口（如 9200）以及 :9100；给下级 Agent 上线 Gateway 用
 #   #   true：允许更广目标（仍拒绝 loopback / 链路本地 / 云元数据等）；勿当开放上网出口
 #   allowGlobal: false
+
+# 可选：Proxy Bridge 反向载波。用于上层 A 能主动连接下层 B，
+# 但 B 不能主动连接 A/Gateway 的网络；配置独立，内部复用 HTTP Proxy engine。
+#
+# B（被连接端）同时开启上面的 proxy，并让 gatewayProxy 指向本机：
+# gatewayProxy: http://proxyuser:changeme@127.0.0.1:3128
+# proxyBridge:
+#   enabled: true
+#   listen: "0.0.0.0:3999"
+#   key: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+#   allowGlobal: false
+#
+# A（主动连接端）只需 Bridge，普通 proxy.enabled 可为 false；A 自己如有
+# gatewayProxy，Bridge 出口会自动继承：
+# proxyBridge:
+#   enabled: true
+#   allowGlobal: false
+#   targets:
+#     - address: "10.0.0.20:3999"
+#       key: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+#
+# proxy.allowGlobal 管普通 listener 请求；proxyBridge.allowGlobal 管 peer 请求。
+# 只访问 Gateway 时两者均保持 false。key 必须为 64 位十六进制随机字符串。
