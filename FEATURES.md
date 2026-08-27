@@ -164,7 +164,7 @@
 |------|------|------|
 | `[x]` | filemanager（目录） | Agent `sessions/filemanager` JSON-RPC：`list`/`stat`/`mkdir`/`remove`/`rename`/`list roots`；**不含**文件内容读写。list 排序：目录优先再文件（名不区分大小写） |
 | `[x]` | Gateway `/ws/file-manager` | 票据 `type=filemanager` → 透传 filemanager JSON-RPC |
-| `[x]` | filetransfer（内容） | 独立会话 `type=filetransfer` → `/ws/file-transfer`；一任务一 `transferId`（跨重连稳定）；Binary 帧（OPST 头 + 1MiB 分块 + 分块 SHA-256），**无 base64**；控制帧 STATUS/ACK/COMMIT/ABORT；上传写 `.ops-upload.<name>.<transferId>.part/.meta`，commit 后原子替换；断线=暂停（保留临时文件），明确取消才清理；不做后台过期清理 |
+| `[x]` | filetransfer（内容） | 独立会话 `type=filetransfer` → `/ws/file-transfer`；一任务一 `transferId`（跨重连稳定）；Binary 帧（OPST 头 + 1MiB 分块 + 分块 SHA-256），**无 base64**；控制帧 STATUS/ACK/COMMIT/ABORT；上传写 `.ops-upload.<name>.<transferId>.part/.meta`，commit 后原子替换；Windows 用 `MoveFileExW(REPLACE_EXISTING|WRITE_THROUGH)`，遇杀软/索引器短暂占用会退避重试，失败时保留原文件（禁止先删目标再 rename）；断线=暂停（保留临时文件），明确取消才清理；不做后台过期清理 |
 | `[x]` | Gateway `/ws/file-transfer` | filetransfer 模块自行解码 Claims/构造 Params，通用桥接发送 `open_session`；Binary/Text 原样桥接；模块 sniffer 审计 direction/path/offset/bytes/resumed（不含 payload） |
 | `[x]` | Console 文件管理页 | 资源管理器布局；目录操作用 `/ws/file-manager`；上传/下载/文本编辑各自开 `filetransfer`；上传自动重连续传、失败暂停可继续；刷新后须重选原文件（指纹校验）；下载优先 File System Access 流式写盘，否则 ≤64MiB Blob；**连接/列目录/树懒加载/下载共用同一 SessionConnectingMask**（连接：「正在连接文件服务器」；列目录：「正在加载目录」；下载两行：「正在下载 文件名」+「已传/总量（%）」） |
 | `[x]` | 上传进度/速度统计 | `rateMeter.js` 5s 滑动窗口算**瞬时**速度（每 500ms 采样，停滞自动衰减到 0）；续传的远端 offset 只作基线不计入速度（`phase:'start'`）；整体速度只统计本次会话实际推送的字节；单文件与整体均显示「已传/总大小」与按瞬时速度推算的剩余时间；完成行显示本次均速 |
