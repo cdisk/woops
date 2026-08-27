@@ -109,19 +109,35 @@ func startBackgrounds(ctx context.Context, starters []BackgroundStarter) {
 }
 
 func (r *Runtime) runControlLoop(ctx context.Context) error {
+	retry := r.retryBase
 	for {
-		if err := r.runOnce(ctx); err != nil {
-			log.Printf("control ended err=%v", err)
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		connected, err := r.runOnce(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if connected {
+				log.Printf("control ended err=%v", err)
+				retry = r.retryBase
+			} else {
+				log.Printf("control connect retry: %v", err)
+				retry = nextRetry(retry, r.retryMax)
+			}
+		} else if connected {
+			retry = r.retryBase
 		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(3 * time.Second):
+		case <-time.After(jitter(retry)):
 		}
 	}
 }
 
-func (r *Runtime) runOnce(ctx context.Context) error {
+func (r *Runtime) runOnce(ctx context.Context) (connected bool, err error) {
 	if err := r.cfg.ReloadCredentials(); err != nil {
 		log.Printf("reload credentials: %v", err)
 	}
@@ -130,8 +146,9 @@ func (r *Runtime) runOnce(ctx context.Context) error {
 	header.Set("X-Agent-Token", r.cfg.AgentToken)
 	ws, _, err := r.dialer.DialContext(ctx, r.cfg.ControlWS, header)
 	if err != nil {
-		return err
+		return false, err
 	}
+	connected = true
 	defer func() {
 		if r.deps.OnControlDisconnect != nil {
 			r.deps.OnControlDisconnect()
@@ -209,14 +226,14 @@ func (r *Runtime) runOnce(ctx context.Context) error {
 	})
 	for {
 		if err := ctx.Err(); err != nil {
-			return err
+			return connected, err
 		}
 		_, data, err := ws.ReadMessage()
 		if err != nil {
 			if ctx.Err() != nil {
-				return ctx.Err()
+				return connected, ctx.Err()
 			}
-			return err
+			return connected, err
 		}
 		_ = ws.SetReadDeadline(time.Now().Add(wsutil.DefaultIdle))
 		var env control.Envelope
