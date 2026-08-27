@@ -175,6 +175,10 @@
           <p class="install-proxy-examples">{{ t('assets.proxyWinExample') }}</p>
           <pre class="install-proxy-pre">$env:https_proxy = 'http://proxyuser:changeme@10.0.0.1:3128'
 {{ t('assets.proxyWinComment') }}</pre>
+          <p class="install-proxy-examples">{{ t('assets.proxyWinCmdExample') }}</p>
+          <pre class="install-proxy-pre">set "HTTPS_PROXY=http://proxyuser:changeme@10.0.0.1:3128"
+set "https_proxy=http://proxyuser:changeme@10.0.0.1:3128"
+{{ t('assets.proxyWinCmdComment') }}</pre>
           <p class="install-proxy-foot">{{ t('assets.proxyFoot') }}</p>
         </div>
       </div>

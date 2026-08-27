@@ -251,7 +251,9 @@ export default {
     proxyLinuxExample: 'Linux 示例：',
     proxyLinuxComment: '# 密码含特殊字符时先编码，例如 ! → %21：\n# 然后执行上方 Linux 安装命令',
     proxyWinExample: 'Windows（PowerShell）示例：',
-    proxyWinComment: '# 然后执行上方 Windows 安装命令',
+    proxyWinComment: '# 然后执行上方 PowerShell 安装命令',
+    proxyWinCmdExample: 'Windows（CMD / Win7·Server 2012）示例：',
+    proxyWinCmdComment: '# 同一 CMD 窗口内 set 后再执行上方 CMD 安装命令',
     proxyFoot:
       '安装脚本会把上述环境变量写入 agent.yaml 的 gatewayProxy：本机 Agent→Gateway 的 WSS 经其 CONNECT。若本机再开入站 proxy.*，给下一跳用时也会自动串同一上游（例：C→B→A→Gateway）。若出现 curl: (22) … 502：多半是代理链某跳连不上（看 journalctl -u woops-agent 里 proxy plugin: / upstream CONNECT）。'
   },

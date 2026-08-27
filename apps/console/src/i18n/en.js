@@ -258,7 +258,9 @@ export default {
     proxyLinuxComment:
       '# Percent-encode special chars in passwords first, e.g. ! → %21:\n# Then run the Linux install command above',
     proxyWinExample: 'Windows (PowerShell) example:',
-    proxyWinComment: '# Then run the Windows install command above',
+    proxyWinComment: '# Then run the PowerShell install command above',
+    proxyWinCmdExample: 'Windows (CMD / Win7·Server 2012) example:',
+    proxyWinCmdComment: '# set in the same CMD window, then run the CMD install command above',
     proxyFoot:
       'The install script writes those env vars into agent.yaml as gatewayProxy so Agent→Gateway WSS uses CONNECT. Inbound proxy.* on this host also chains the same upstream automatically (e.g. C→B→A→Gateway). If you see curl: (22) … 502, a hop in the proxy chain is likely down (check journalctl -u woops-agent for proxy plugin: / upstream CONNECT).'
   },
