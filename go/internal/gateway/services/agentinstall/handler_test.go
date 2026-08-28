@@ -49,8 +49,12 @@ func TestResolveAgentBinaryWindowsExe(t *testing.T) {
 func TestResolveWoopsctlBinary(t *testing.T) {
 	dir := t.TempDir()
 	linux := filepath.Join(dir, "woopsctl-linux-amd64")
+	arm := filepath.Join(dir, "woopsctl-linux-arm64")
 	win := filepath.Join(dir, "woopsctl-windows-amd64.exe")
 	if err := os.WriteFile(linux, []byte("ctl"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(arm, []byte("ctl"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(win, []byte("ctl"), 0o755); err != nil {
@@ -60,13 +64,13 @@ func TestResolveWoopsctlBinary(t *testing.T) {
 	if path != linux || name != "woopsctl-linux-amd64" {
 		t.Fatalf("linux: path=%q name=%q", path, name)
 	}
+	path, name = resolveWoopsctlBinary(dir, "linux", "arm64")
+	if path != arm || name != "woopsctl-linux-arm64" {
+		t.Fatalf("linux arm64: path=%q name=%q", path, name)
+	}
 	path, name = resolveWoopsctlBinary(dir, "windows", "amd64")
 	if path != win || name != "woopsctl-windows-amd64.exe" {
 		t.Fatalf("windows: path=%q name=%q", path, name)
-	}
-	path, name = resolveWoopsctlBinary(dir, "linux", "arm64")
-	if path != "" || name != "woopsctl-linux-arm64" {
-		t.Fatalf("missing: path=%q name=%q", path, name)
 	}
 }
 

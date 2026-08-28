@@ -793,6 +793,7 @@ export default {
     create: '创建 Token',
     downloadWoopsctl: '下载 woopsctl',
     downloadLinuxAmd64: 'Linux (amd64)',
+    downloadLinuxArm64: 'Linux (arm64)',
     downloadWindowsAmd64: 'Windows (amd64)',
     downloadFailed: '下载失败',
     downloadHttpFailed: '下载失败（HTTP {status}）',

@@ -813,6 +813,7 @@ export default {
     create: 'Create token',
     downloadWoopsctl: 'Download woopsctl',
     downloadLinuxAmd64: 'Linux (amd64)',
+    downloadLinuxArm64: 'Linux (arm64)',
     downloadWindowsAmd64: 'Windows (amd64)',
     downloadFailed: 'Download failed',
     downloadHttpFailed: 'Download failed (HTTP {status})',

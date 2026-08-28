@@ -158,6 +158,7 @@ const createdConfigJson = ref('')
 
 const woopsctlDownloads = computed(() => [
   { key: 'linux-amd64', os: 'linux', arch: 'amd64', label: t('deployToken.downloadLinuxAmd64'), filename: 'woopsctl' },
+  { key: 'linux-arm64', os: 'linux', arch: 'arm64', label: t('deployToken.downloadLinuxArm64'), filename: 'woopsctl' },
   { key: 'windows-amd64', os: 'windows', arch: 'amd64', label: t('deployToken.downloadWindowsAmd64'), filename: 'woopsctl.exe' }
 ])
 

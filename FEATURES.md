@@ -4,7 +4,7 @@
 > 任何功能新增、完成、搁置、行为变更，都必须先读本文件，并在同一变更中更新对应条目的状态与说明。  
 > README 只保留快速启动。历史设计稿 `bastion_architecture_design_*.plan.md` 不必再读。
 
-**最后更新：** 2026-08-27（控制 WSS 重连指数退避）
+**最后更新：** 2026-08-28（woopsctl linux/arm64 构建与 Console 下载）
 
 ---
 
@@ -109,7 +109,7 @@
 | `[x]` | `GET /i/{code}/install.ps1` | Windows（Win10+）：`curl.exe -o $env:TEMP\…; powershell -File`；有 pin：`-k --pinnedpubkey`；源文件 `gateway/services/agentinstall/install.ps1` |
 | `[x]` | `GET /i/{code}/install.bat` | Windows legacy（Win7 / Server 2012）：纯 cmd、**ASCII-only REM**、**CRLF**；**手工安装**下载 `%TEMP%\install.bat`；**一键更新**下载 `%ProgramData%\woops-agent\install.bat` 再 `cmd /c call`；`LIVE=1` 时暂存 `woops-agent-new.exe` 后 `restart-update.bat` 异步重启；`agent.yaml` **整文件重写**为 ASCII 最小配置（禁止 findstr 合并 UTF-8/BOM，否则 `yaml: line 3`）；`asset-id` 用 `set /p` 复用；build &lt; 17763 自动下 WinPTY |
 | `[x]` | `GET /i/{code}/agent/{os}/{arch}` | 产物名 `woops-agent-{os}-{arch}`（`.exe`/`.gz`）；`-ldflags=-s -w -X main.Version=…`；可选旁路 `.gz`，安装脚本 `?format=gz` 优先（约 10MB→3MB 下载）；**Docker Gateway** 同步编 `linux/amd64` + `linux/arm64` + `windows/amd64`；gateway/Linux/woopsctl 用当前 Go，**Windows Agent 独立固定 Go 1.20.14**（Go 1.21+ 产物不能运行于 Win7 / Server 2012） |
-| `[x]` | `GET /bin/woopsctl/{os}/{arch}` | 公开下载（无需安装码）；产物 `woopsctl-{os}-{arch}`（Windows `.exe`）；**Docker Gateway** 同编 `linux/amd64` + `windows/amd64`；Console 部署 Token 旁下拉；nginx/Vite 同源 `/bin/` 反代 Gateway |
+| `[x]` | `GET /bin/woopsctl/{os}/{arch}` | 公开下载（无需安装码）；产物 `woopsctl-{os}-{arch}`（Windows `.exe`）；**Docker Gateway** 同编 `linux/amd64` + `linux/arm64` + `windows/amd64`；Console 部署 Token 旁下拉；nginx/Vite 同源 `/bin/` 反代 Gateway |
 | `[x]` | install 脚本行为 | 先下载并校验，再更新 `agent.yaml`，原子写权限受限的旁路 `install-code`，最后启动 Agent；**注册由 Agent 完成**，脚本不再 POST/解析注册响应或写身份凭据。冷装等待最多 60s，确认 `asset-id`/`agent-token` 非空且安装码已消费；重装保留 `asset-id`，Agent 提交旧 id 以迁组并轮换 token；**在线更新**：`LIVE=1`（一键更新/Web Shell）始终延迟 stop→start，安装进程内不停活 agent，新进程自注册，Console 轮询重上线；优先 `systemd-run --no-block`，否则回退 `setsid`/`nohup`；Windows legacy CMD 用独立 `restart-update.bat`。Linux/PowerShell 保留本地 `proxy`/`proxyBridge` 配置；legacy BAT 对已有 YAML 原样保留，避免 UTF-8/BOM 与嵌套配置损坏。下载按 pin；Gateway 嵌入 agent SHA-256；依赖预检 curl/xxd/sha256sum；gzip 可选；已移除 `ops-agent` 迁移/回退 |
 | `[x]` | Agent HTTPS 自注册 | Agent 启动先起 pre-auth `proxy`/`proxyBridge`，读取旁路 `install-code`，经统一 Gateway HTTP client 调 `POST /api/agent/register`（Gateway 反代私网 control-api）；响应 `assetId`/`agentToken`/`reused`；可选旧 `assetId` 复用并轮换 token，同时按安装码 `groupId` 迁移分组；上报 hostname、详细 OS/arch、内网 IP、`agentVersion`。凭据临时文件 sync 后原子替换（Windows `MoveFileExW`），确认后删除安装码，无需重启直接进入 control/metrics；同一被拒安装码不轰炸，替换文件后恢复 |
 | `[x]` | Agent 验 Gateway | control / session / metrics（含 portmap 隧道）共用 TLS dialer；有 pin 时校 SPKI；无 pin 走系统 CA；假 Gateway / 错 pin 在握手失败，不发 `agent-token`；可选 `gatewayProxy` 时经 HTTP CONNECT 出站（目标 DNS 由代理解析） |
@@ -263,7 +263,7 @@
 
 | 状态 | 功能 | 说明 |
 |------|------|------|
-| `[x]` | `woopsctl` 二进制 | `go/cmd/woopsctl`（内部实现 `go/internal/opsctl`）：`upload` / `download` / `exec` / `forward` / `reverse`；env **`OPSCTL_CONFIG`** JSON（server/token/pin）；`server` 须 `https://`；pin 校 Gateway TLS；远端 exit code 透传；公开下载 `GET /bin/woopsctl/{os}/{arch}`（Docker 内置 amd64） |
+| `[x]` | `woopsctl` 二进制 | `go/cmd/woopsctl`（内部实现 `go/internal/opsctl`）：`upload` / `download` / `exec` / `forward` / `reverse`；env **`OPSCTL_CONFIG`** JSON（server/token/pin）；`server` 须 `https://`；pin 校 Gateway TLS；远端 exit code 透传；公开下载 `GET /bin/woopsctl/{os}/{arch}`（Docker 内置 linux amd64/arm64 + windows amd64） |
 | `[x]` | 部署 Token | 表 `deploy_tokens`：绑 **单资产**、可选 `remark`、`allow_upload`/`allow_download`/`allow_exec`/`allow_forward`/`allow_reverse`（五项独立；旧 `allow_portmap` 启动时迁移后删除）、`expires_at` 可空=无限期、吊销；forward/reverse 默认关闭；创建时返回 `opsctlConfig` / `opsctlConfigJson`（只一次）；SHA-256 存库；管理 API `/api/assets/{id}/deploy-tokens`；Console 资产详情 dialog 右侧面板（创建旁 **下载 woopsctl** Linux/Windows） |
 | `[x]` | `woopsctl upload` / `download` / `exec` | Gateway 反代换票 → `/ws/file-transfer` 或 `/ws/exec`；上传下载与 Console 同一二进制协议（自动重连续传）；stderr 进度：换票/连接/已传总量/%/速度/已耗时/ETA（TTY 同行刷新）；Agent `sessions/exec` 流式输出；运行态：EXEC `OPERATION` + `RUN` ACTION（command/cwd/timeout，**不落 stdout/stderr**）+ END 带 `exitCode`/`durationMs` |
 | `[x]` | GitLab CI 示例与文档 | `docs/woopsctl-gitlab-ci.md` |
