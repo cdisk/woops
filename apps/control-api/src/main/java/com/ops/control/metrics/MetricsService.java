@@ -11,6 +11,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
@@ -168,47 +169,49 @@ public class MetricsService {
             itemIds = itemDefs.findByChartDefaultTrueOrderByItemIdAsc().stream()
                     .map(MonitorItemDefEntity::getItemId).toList();
         }
-        String g = normalizeGrain(grain);
+        String g = effectiveGrain(grain, from, to);
         String inst = instance == null ? "" : instance;
-        // Native any(text[]) is awkward via Spring; query per itemId for simplicity.
         Map<String, List<Map<String, Object>>> series = new LinkedHashMap<>();
         Map<String, MonitorItemDefEntity> defs = new HashMap<>();
         for (MonitorItemDefEntity d : itemDefs.findAll()) {
             defs.put(d.getItemId(), d);
         }
+        String placeholders = String.join(",", Collections.nCopies(itemIds.size(), "?"));
+        String sql = """
+                select item_id, date_trunc(?, time) as bucket, instance, avg(metric_value) as metric_value
+                from monitor_data
+                where asset_id = ? and item_id in (%s)
+                  and time >= ? and time < ?
+                  and (? = '' or instance = ?)
+                group by item_id, bucket, instance
+                order by item_id asc, bucket asc, instance asc
+                """.formatted(placeholders);
+        List<Object> args = new ArrayList<>();
+        args.add(g);
+        args.add(assetId);
+        args.addAll(itemIds);
+        args.add(Timestamp.from(from));
+        args.add(Timestamp.from(to));
+        args.add(inst);
+        args.add(inst);
+        jdbc.query(sql, rs -> {
+            String itemId = rs.getString("item_id");
+            String rowInstance = rs.getString("instance");
+            String key = itemId + (rowInstance == null || rowInstance.isEmpty() ? "" : ("|" + rowInstance));
+            Timestamp bucket = rs.getTimestamp("bucket");
+            series.computeIfAbsent(key, k -> new ArrayList<>()).add(Map.of(
+                    "time", bucket.toInstant().toString(),
+                    "value", rs.getDouble("metric_value")
+            ));
+        }, args.toArray());
+        // Keep response series ordered by the requested chart order rather than SQL lexical order.
+        Map<String, List<Map<String, Object>>> orderedSeries = new LinkedHashMap<>();
         for (String itemId : itemIds) {
-            List<Map<String, Object>> points = jdbc.query(
-                    """
-                    select date_trunc(?, time) as bucket, instance, avg(metric_value) as metric_value
-                    from monitor_data
-                    where asset_id = ? and item_id = ?
-                      and time >= ? and time < ?
-                      and (? = '' or instance = ?)
-                    group by bucket, instance
-                    order by bucket asc, instance asc
-                    """,
-                    (rs, i) -> {
-                        Map<String, Object> m = new LinkedHashMap<>();
-                        Timestamp bucket = rs.getTimestamp("bucket");
-                        m.put("time", bucket.toInstant().toString());
-                        m.put("instance", rs.getString("instance"));
-                        m.put("value", rs.getDouble("metric_value"));
-                        return m;
-                    },
-                    g, assetId, itemId, Timestamp.from(from), Timestamp.from(to), inst, inst);
-            // Split by instance into named series keys
-            Map<String, List<Map<String, Object>>> byInst = new LinkedHashMap<>();
-            for (Map<String, Object> p : points) {
-                String key = itemId + (p.get("instance") == null || p.get("instance").toString().isEmpty()
-                        ? "" : ("|" + p.get("instance")));
-                byInst.computeIfAbsent(key, k -> new ArrayList<>()).add(Map.of(
-                        "time", p.get("time"),
-                        "value", p.get("value")
-                ));
-            }
-            for (var e : byInst.entrySet()) {
-                series.put(e.getKey(), e.getValue());
-            }
+            series.forEach((key, points) -> {
+                if (key.equals(itemId) || key.startsWith(itemId + "|")) {
+                    orderedSeries.put(key, points);
+                }
+            });
         }
         List<Map<String, Object>> meta = new ArrayList<>();
         for (String itemId : itemIds) {
@@ -224,17 +227,29 @@ public class MetricsService {
                 "from", from.toString(),
                 "to", to.toString(),
                 "items", meta,
-                "series", series
+                "series", orderedSeries
         );
     }
 
-    private static String normalizeGrain(String grain) {
+    static String normalizeGrain(String grain) {
         if (grain == null) return "minute";
         return switch (grain.toLowerCase(Locale.ROOT)) {
             case "day" -> "day";
             case "month" -> "month";
             default -> "minute";
         };
+    }
+
+    static String effectiveGrain(String requested, Instant from, Instant to) {
+        String grain = normalizeGrain(requested);
+        Duration span = Duration.between(from, to);
+        if (span.compareTo(Duration.ofDays(180)) > 0) {
+            return "month";
+        }
+        if ("minute".equals(grain) && span.compareTo(Duration.ofDays(3)) > 0) {
+            return "day";
+        }
+        return grain;
     }
 
     public Map<String, Object> dashboardSummary() {

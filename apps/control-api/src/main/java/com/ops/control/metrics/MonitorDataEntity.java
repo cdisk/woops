@@ -5,9 +5,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "monitor_data", indexes = {
-        @Index(name = "idx_monitor_data_lookup", columnList = "asset_id,item_id,instance,time")
-})
+@Table(name = "monitor_data")
 @IdClass(MonitorDataId.class)
 public class MonitorDataEntity {
     @Id

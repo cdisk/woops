@@ -19,7 +19,7 @@
           :start-placeholder="t('monitor.start')"
           :end-placeholder="t('monitor.end')"
           size="small"
-          @change="loadSeries"
+          @change="handleRangeChange"
         />
         <el-radio-group v-model="grain" size="small" @change="loadSeries">
           <el-radio-button value="minute">{{ t('monitor.grainMinute') }}</el-radio-button>
@@ -77,10 +77,15 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { IconArrowLeft } from '@tabler/icons-vue'
-import * as echarts from 'echarts'
+import { LineChart } from 'echarts/charts'
+import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
+import { init, use } from 'echarts/core'
+import { CanvasRenderer } from 'echarts/renderers'
 import api from '../../shared/api'
 import { closeSessionTab } from '../../session/sessionWs'
 import SessionAssetTitle from '../../session/SessionAssetTitle.vue'
+
+use([LineChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
 
 const { t } = useI18n()
 
@@ -239,10 +244,11 @@ async function loadSeries() {
     from: from ? new Date(from).toISOString() : undefined,
     to: to ? new Date(to).toISOString() : undefined
   }
-  const keys = chartDefs.value.map((c) => c.itemId).join(',')
+  const keys = CHART_ORDER.join(',')
   if (keys) params.keys = keys
   const { data } = await api.get(`/assets/${props.assetId}/metrics/series`, { params })
   seriesPayload.value = data || { series: {} }
+  if (data?.grain) grain.value = data.grain
   await nextTick()
   renderCharts()
 }
@@ -257,6 +263,20 @@ const CHART_ORDER = [
   'net.rx_bytes_per_sec',
   'net.tx_bytes_per_sec'
 ]
+
+function recommendedGrain() {
+  const [from, to] = range.value || []
+  if (!from || !to) return grain.value
+  const spanMs = Math.max(0, new Date(to).getTime() - new Date(from).getTime())
+  if (spanMs > 180 * 24 * 3600 * 1000) return 'month'
+  if (spanMs > 3 * 24 * 3600 * 1000) return 'day'
+  return 'minute'
+}
+
+async function handleRangeChange() {
+  grain.value = recommendedGrain()
+  await loadSeries()
+}
 
 async function loadItemDefs() {
   const { data } = await api.get('/monitor/items')
@@ -305,7 +325,7 @@ function renderCharts() {
     const el = chartEls[ch.itemId]
     if (!el) continue
     if (!charts[ch.itemId]) {
-      charts[ch.itemId] = echarts.init(el)
+      charts[ch.itemId] = init(el)
     }
     const chart = charts[ch.itemId]
     const seriesKeys = Object.keys(seriesMap).filter((k) => k === ch.itemId || k.startsWith(ch.itemId + '|'))
@@ -348,8 +368,7 @@ function renderCharts() {
 async function reload() {
   loading.value = true
   try {
-    await loadLatest()
-    await loadSeries()
+    await Promise.all([loadLatest(), loadSeries()])
   } finally {
     loading.value = false
   }
@@ -364,9 +383,9 @@ watch(() => props.assetId, () => reload())
 onMounted(async () => {
   loading.value = true
   try {
-    await loadItemDefs()
-    await loadLatest()
-    await loadSeries()
+    await Promise.all([loadItemDefs(), loadLatest(), loadSeries()])
+    await nextTick()
+    renderCharts()
   } finally {
     loading.value = false
   }
