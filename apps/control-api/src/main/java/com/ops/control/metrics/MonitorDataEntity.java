@@ -5,7 +5,7 @@ import java.time.Instant;
 import java.util.UUID;
 
 @Entity
-@Table(name = "monitor_data")
+@Table(name = "monitor_history")
 @IdClass(MonitorDataId.class)
 public class MonitorDataEntity {
     @Id

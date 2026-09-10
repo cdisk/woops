@@ -4,7 +4,7 @@
 > 任何功能新增、完成、搁置、行为变更，都必须先读本文件，并在同一变更中更新对应条目的状态与说明。  
 > README 只保留快速启动。历史设计稿 `bastion_architecture_design_*.plan.md` 不必再读。
 
-**最后更新：** 2026-09-04（资产监控查询与自适应时间粒度优化）
+**最后更新：** 2026-09-10（一年默认按日而非按月）
 
 ---
 
@@ -45,7 +45,7 @@
 | 状态 | 功能 | 说明 |
 |------|------|------|
 | `[x]` | Monorepo 骨架 | `apps/console`、`apps/control-api`、`go/{gateway,agent}`、`go/cmd/woopsctl`、`go/internal/opsctl`、`deploy/`；环境变量 `.env.example` → 本机 `.env`（不入库）+ README 编译/启动；许可证 Apache-2.0 |
-| `[x]` | PostgreSQL | Compose 起库；Java 唯一写库；**不用 H2**。默认账密 `ops`/`ops`（生产务必改）；compose 映射宿主 `:5432` 给本机工具，公网靠防火墙关掉 |
+| `[x]` | PostgreSQL + TimescaleDB | Compose 用 **`timescale/timescaledb:2.29.2-pg16`**（监控依赖扩展；`command` 设 `shared_preload_libraries=timescaledb`）；Java 唯一写库；**不用 H2**。默认账密 `ops`/`ops`（生产务必改）；compose 映射宿主 `:5432` 给本机工具，公网靠防火墙关掉。**control-api 启动**幂等执行 `CREATE EXTENSION` / `create_hypertable` / 压缩策略（`MetricsTimescaleBootstrap`，打进 control-api 镜像） |
 | `[x]` | docker-compose 全栈 | `deploy/env.prod.example`；服务器 `/opt/ops`；profiles `full`+`desktop`；**Gateway `network_mode: host`**（9200/9201 + 端口池直绑宿主，无大段 docker-proxy）；TLS 挂 `deploy/tls`（gitignore）；`Dockerfile.control-api` 用阿里云 Maven + BuildKit `/root/.m2` 缓存。full 另映射 control-api `:9100`、guacd `:4822`（给 host 网 Gateway 用，公网靠防火墙） |
 | `[x]` | guacd sidecar | `deploy/docker-compose.yml` → `guacamole/guacd:1.5.5`（发布宿主 `:4822`）；Gateway `OPS_GUACD_ADDR=127.0.0.1:4822`、`OPS_GUAC_BRIDGE_HOST=host.docker.internal`；console/control-api/guacd 配 `extra_hosts: host.docker.internal:host-gateway` |
 | `[x]` | `data/ops-audit/` 卷 | 运行态 JSONL **与会话录像**的本地根目录；`OPS_AUDIT_DIR`（默认 `./data/ops-audit`；Compose `/data/ops-audit` 同时挂 control-api / gateway / guacd）；已 gitignore |
@@ -118,11 +118,11 @@
 | `[x]` | 一会话一数据 WSS | TCP binary chunk ≈ io.Copy；**协议层 Ping/Pong keepalive**（Gateway 对 browser+agent 两侧每 25s Ping、90s 无 Pong/数据则读超时关闭并 `auditEnd`；与 Text/Binary 业务帧分离，无新信令）。Shell 的 Agent 侧同超时续期；filemanager/exec/filetransfer 仅靠 Gateway 探测（避免长写无读误杀） |
 | `[x]` | `protocol_version` / Envelope | `internal/protocol/control`；未知类型忽略；`open_session` **仅**嵌套 `params`（`ShellParams`/`FileTransferParams`/`TunnelParams`）；`netinfo` 仅 `privateIp` CSV；**已移除**平铺字段双写/回退与 `privateIps` 数组双发。golden：`internal/protocol/control/testdata/open_session/` |
 | `[x]` | 监控插件 · 独立 metrics WSS | `/ws/agent/metrics`；`agent/plugins/monitor` + `gateway/plugins/monitor`；默认 60s；`metrics.enabled` 可关；断线不标离线；网卡与 `core/netinfo` 共用 `hostinfo/netiface` 真实网卡过滤；磁盘容量排除光驱（`iso9660`/`udf`/`cdfs`；Windows 另 `GetDriveType`=`DRIVE_CDROM`）；Gateway 对 Agent Ping 用 `PingHandler` 续期 120s 读超时（曾约 120s 周期 1006） |
-| `[x]` | 监控扁表时序 | `monitor_data(asset_id,item_id,instance,time,value)`；字典 `monitor_item_def`；保留 **3 年**；无 JSON 快照 |
-| `[x]` | 监控曲线 / 聚合 | `GET …/metrics/series`；grain=minute\|day\|month；前端时间范围 **>3 日自动按日、>180 日自动按月**，后端同步强制粒度下限；多指标合并为单次 SQL；启动后台 `CREATE INDEX CONCURRENTLY` 建 `idx_monitor_data_series(asset_id,item_id,time,instance)`（不自动删旧索引） |
+| `[x]` | 监控 Timescale history + trends | **`monitor_history`**（分钟明细 hypertable，近 **7** 天可配）+ **`monitor_trends`**（小时 `min/max/avg/sample_count`，保留 **3** 年可配）；字典 `monitor_item_def`；每小时汇集上一小时并删除超期明细；压缩策略由启动引导自动加；旧表名 `monitor_data` 已迁完 |
+| `[x]` | 监控曲线 / 聚合 | `GET …/metrics/series`；grain=minute\|hour\|day\|month；选表：起点在明细保留窗内且跨度≤保留窗 → history，否则 trends；**UI 默认按点数**：≤3 日按分、≤90 日按小时、更长（含 1 年）按日、>3 年按月；**手动选择优先**；后端仅在 trends 无法提供「按分」时改写为小时；多指标合并单次 SQL |
 | `[x]` | 监控预警 | 全局阈值（优先 %）；入库评估；`asset_alert_status`；配置 CRUD；**仅超管**可见菜单与 API。首页异常含离线；忽略按 **资产+监控项**（`asset_alert_ignores`，离线项 `host.online`） |
 | `[x]` | 首页概览 | 资产总数 / 在线 / 异常（**含离线**，与监控预警并列）；登录进首页。异常按监控项可 **忽略 / 取消忽略**（如只忽略离线或 CPU，不影响该资产其他项；忽略后不占异常列表；「异常资产」标题右侧打开已忽略弹窗 `IgnoredAlertsDialog`；可见资产即可操作；控制审计 `MONITOR`/`IGNORE`/`UNIGNORE`）。异常列表与已忽略清单均展示 **分组**（`groupId`/`groupName`，未分组显示「未分组」；已忽略弹窗加宽） |
-| `[x]` | 资产监控页 | 操作「监控」→ 新浏览器标签 `/assets/:id/monitor`（无侧栏，同会话页）；复用 `AssetMonitorPanel`；顶部规格；各图下最高/平均/最低；标题左侧关闭（有 opener 则关标签）；首屏 items/latest/series 并行加载，ECharts 按需打包 |
+| `[x]` | 资产监控页 | 操作「监控」→ 新浏览器标签 `/assets/:id/monitor`（无侧栏，同会话页）；复用 `AssetMonitorPanel`；顶部规格；各图下最高/平均/最低；时间范围快捷：5 分钟 / 30 分钟 / 1 小时 / 6 小时 / 1 天 / 7 天 / 30 天 / 90 天 / 1 年；图表横向框选时间后按该范围重载全部曲线并自适应 grain；标题左侧关闭（有 opener 则关标签）；首屏 items/latest/series 并行加载，ECharts 按需打包 |
 | `[ ]` | 资产列表指标摘要 | 可读 `monitor_latest`；未做 |
 | `[x]` | Agent 内置 HTTP 正向代理 | 插件式 `go/internal/agent/plugins/proxy`：`TryStart` 软失败不影响控制面；`agent.yaml` `proxy.*`（enabled/listen/username/password/allowCIDRs/allowGlobal）；CONNECT + forward；账密强制；来源 CIDR；`allowGlobal=false` 仅 ops host（`gateway` 主机 :gwPort+`:9100`）；全局时拒 loopback/元数据；**有 `gatewayProxy` 时入站出站经上游 CONNECT/forward 串联**（防环：拒连上游自身） |
 | `[x]` | 代理模式 + agent 模式同二进制 | 外网/内网1 开入站 `proxy.*`；更深内网装 Agent 时设 `https_proxy`→`gatewayProxy`（本机 WSS + 可选再开 `proxy.*` 给下一跳）；多级：C→B(proxy+gatewayProxy=A)→A(proxy)→Gateway；`proxy.enabled=true` 时自动写本地 `proxy.log`（见下行） |
@@ -320,7 +320,7 @@
 
 - Redis、消息队列、微服务拆分、多 Gateway HA 调度  
 - Gateway 单 WSS 多路复用 / lane / QUIC / 自定义 RPC（`proxyBridge` 仅在 Agent↔Agent TCP carrier 内用 yamux 承载彼此独立的标准 HTTP Proxy 连接，不改变一会话一 WSS）
-- Timescale/专用 TSDB（监控用普通 PG 扁表；撑不住再议）、告警通知渠道（邮件/Webhook）、进程列表/Top、GPU/温度/磁盘 util%  
+- 专用 TSDB / ClickHouse（监控已用 **TimescaleDB** history+trends）、告警通知渠道（邮件/Webhook）、进程列表/Top、GPU/温度/磁盘 util%  
 - 端口映射：Gateway 冷启动不主动拉全量清单（恢复见 §6 Agent 上线）  
 - Agent 自动升级平台（控制台一键更新 + 手工重装即可）  
 - SFTP 文件管理（主路径为 Agent 原生 filemanager/filetransfer）  

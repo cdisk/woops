@@ -14,12 +14,16 @@ public class MetricsRetentionJob {
         this.metrics = metrics;
     }
 
-    /** Daily purge of points older than 3 years. */
+    /** Daily purge of history beyond detail retention and trends beyond trends retention. */
     @Scheduled(cron = "0 30 3 * * *")
     public void purge() {
-        int n = metrics.purgeOlderThanThreeYears();
-        if (n > 0) {
-            log.info("purged {} monitor_data rows older than 3 years", n);
+        int history = metrics.purgeHistoryOlderThanRetention();
+        if (history > 0) {
+            log.info("purged {} monitor_history rows beyond detail retention", history);
+        }
+        int trends = metrics.purgeTrendsOlderThanRetention();
+        if (trends > 0) {
+            log.info("purged {} monitor_trends rows beyond trends retention", trends);
         }
     }
 }

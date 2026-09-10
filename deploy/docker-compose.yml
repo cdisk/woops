@@ -3,7 +3,9 @@
 # Gateway 使用 network_mode: host（9200/9201 + 端口池直绑宿主，无 docker-proxy）。
 services:
   postgres:
-    image: postgres:16-alpine
+    # TimescaleDB: image + preload here; extension/hypertable/compression via control-api MetricsTimescaleBootstrap.
+    image: timescale/timescaledb:2.29.2-pg16
+    command: ["postgres", "-c", "shared_preload_libraries=timescaledb"]
     environment:
       POSTGRES_DB: ops
       POSTGRES_USER: ops

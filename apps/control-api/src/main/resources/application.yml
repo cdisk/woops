@@ -49,3 +49,8 @@ ops:
     client-secret: ${OPS_GITLAB_CLIENT_SECRET:}
     redirect-uri: ${OPS_GITLAB_REDIRECT_URI:}
     admin-user: ${OPS_GITLAB_ADMIN_USER:}
+  # Monitor history (minute) + trends (hourly). See FEATURES.md
+  monitor:
+    detail-retention-days: ${OPS_MONITOR_DETAIL_RETENTION_DAYS:7}
+    trends-retention-days: ${OPS_MONITOR_TRENDS_RETENTION_DAYS:1095}
+    trends-enabled: ${OPS_MONITOR_TRENDS_ENABLED:true}

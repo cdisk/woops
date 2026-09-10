@@ -18,11 +18,13 @@
           :range-separator="t('monitor.rangeTo')"
           :start-placeholder="t('monitor.start')"
           :end-placeholder="t('monitor.end')"
+          :shortcuts="rangeShortcuts"
           size="small"
           @change="handleRangeChange"
         />
-        <el-radio-group v-model="grain" size="small" @change="loadSeries">
+        <el-radio-group v-model="grain" size="small" @change="handleGrainChange">
           <el-radio-button value="minute">{{ t('monitor.grainMinute') }}</el-radio-button>
+          <el-radio-button value="hour">{{ t('monitor.grainHour') }}</el-radio-button>
           <el-radio-button value="day">{{ t('monitor.grainDay') }}</el-radio-button>
           <el-radio-button value="month">{{ t('monitor.grainMonth') }}</el-radio-button>
         </el-radio-group>
@@ -38,6 +40,7 @@
     </div>
 
     <div class="charts">
+      <p class="brush-hint">{{ t('monitor.brushHint') }}</p>
       <div v-for="ch in chartDefs" :key="ch.itemId" class="chart-box">
         <div class="chart-title">{{ ch.name }}</div>
         <div :ref="(el) => setChartRef(ch.itemId, el)" class="chart"></div>
@@ -78,14 +81,14 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { IconArrowLeft } from '@tabler/icons-vue'
 import { LineChart } from 'echarts/charts'
-import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
+import { BrushComponent, GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import { init, use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
 import api from '../../shared/api'
 import { closeSessionTab } from '../../session/sessionWs'
 import SessionAssetTitle from '../../session/SessionAssetTitle.vue'
 
-use([LineChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
+use([LineChart, BrushComponent, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
 
 const { t } = useI18n()
 
@@ -106,6 +109,38 @@ const chartDefs = ref([])
 const seriesPayload = ref({ series: {} })
 const chartEls = {}
 const charts = {}
+/** Skip radio @change when grain is updated programmatically (range/API). */
+let suppressGrainChange = false
+
+function rangeEndingNow(ms) {
+  const end = new Date()
+  return [new Date(end.getTime() - ms), end]
+}
+
+const MS = {
+  m: 60 * 1000,
+  h: 3600 * 1000,
+  d: 24 * 3600 * 1000
+}
+
+const rangeShortcuts = computed(() => [
+  { text: t('monitor.range5m'), value: () => rangeEndingNow(5 * MS.m) },
+  { text: t('monitor.range30m'), value: () => rangeEndingNow(30 * MS.m) },
+  { text: t('monitor.range1h'), value: () => rangeEndingNow(MS.h) },
+  { text: t('monitor.range6h'), value: () => rangeEndingNow(6 * MS.h) },
+  { text: t('monitor.range1d'), value: () => rangeEndingNow(MS.d) },
+  { text: t('monitor.range7d'), value: () => rangeEndingNow(7 * MS.d) },
+  { text: t('monitor.range30d'), value: () => rangeEndingNow(30 * MS.d) },
+  { text: t('monitor.range90d'), value: () => rangeEndingNow(90 * MS.d) },
+  { text: t('monitor.range1y'), value: () => rangeEndingNow(365 * MS.d) }
+])
+
+function setGrain(next) {
+  if (grain.value === next) return
+  suppressGrainChange = true
+  grain.value = next
+  suppressGrainChange = false
+}
 
 function setChartRef(id, el) {
   if (el) chartEls[id] = el
@@ -248,9 +283,21 @@ async function loadSeries() {
   if (keys) params.keys = keys
   const { data } = await api.get(`/assets/${props.assetId}/metrics/series`, { params })
   seriesPayload.value = data || { series: {} }
-  if (data?.grain) grain.value = data.grain
+  // Only sync UI when API had to rewrite (e.g. trends has no minute).
+  if (data?.grain && data.grain !== grain.value) {
+    setGrain(data.grain)
+  }
   await nextTick()
   renderCharts()
+}
+
+async function withPanelLoading(task) {
+  loading.value = true
+  try {
+    await task()
+  } finally {
+    loading.value = false
+  }
 }
 
 /** Display order: CPU → mem → disk → Load → Swap → nic rx/tx */
@@ -268,14 +315,22 @@ function recommendedGrain() {
   const [from, to] = range.value || []
   if (!from || !to) return grain.value
   const spanMs = Math.max(0, new Date(to).getTime() - new Date(from).getTime())
-  if (spanMs > 180 * 24 * 3600 * 1000) return 'month'
-  if (spanMs > 3 * 24 * 3600 * 1000) return 'day'
+  // Defaults by rough point budget (manual choice still wins):
+  // minute ≤3d; hour ≤90d (~2k pts); day for longer incl. 1y (~365 pts); month only multi-year.
+  if (spanMs > 3 * 365 * MS.d) return 'month'
+  if (spanMs > 90 * MS.d) return 'day'
+  if (spanMs > 3 * MS.d) return 'hour'
   return 'minute'
 }
 
 async function handleRangeChange() {
-  grain.value = recommendedGrain()
-  await loadSeries()
+  setGrain(recommendedGrain())
+  await withPanelLoading(loadSeries)
+}
+
+async function handleGrainChange() {
+  if (suppressGrainChange) return
+  await withPanelLoading(loadSeries)
 }
 
 async function loadItemDefs() {
@@ -319,6 +374,55 @@ const chartStats = computed(() => {
   return out
 })
 
+function clearChartBrushes() {
+  Object.values(charts).forEach((c) => {
+    c.dispatchAction({ type: 'brush', command: 'clear', areas: [] })
+  })
+}
+
+function enableChartBrush(chart) {
+  chart.dispatchAction({
+    type: 'takeGlobalCursor',
+    key: 'brush',
+    brushOption: { brushType: 'lineX', brushMode: 'single' }
+  })
+}
+
+function bindChartBrush(chart) {
+  if (chart.__monitorBrushBound) return
+  chart.__monitorBrushBound = true
+  chart.on('brushEnd', (params) => {
+    void applyBrushRange(params)
+  })
+}
+
+function parseBrushTime(v) {
+  if (typeof v === 'number' && Number.isFinite(v)) return v
+  if (Array.isArray(v) && v.length >= 1) return parseBrushTime(v[0])
+  const t = new Date(v).getTime()
+  return Number.isFinite(t) ? t : NaN
+}
+
+async function applyBrushRange(params) {
+  if (loading.value) return
+  const area = params?.areas?.[0]
+  if (!area?.coordRange || area.coordRange.length < 2) return
+  let t0 = parseBrushTime(area.coordRange[0])
+  let t1 = parseBrushTime(area.coordRange[1])
+  if (!Number.isFinite(t0) || !Number.isFinite(t1)) return
+  if (t0 > t1) [t0, t1] = [t1, t0]
+  // Ignore tiny accidental drags (< 1 minute).
+  if (t1 - t0 < MS.m) {
+    clearChartBrushes()
+    Object.values(charts).forEach(enableChartBrush)
+    return
+  }
+  range.value = [new Date(t0), new Date(t1)]
+  clearChartBrushes()
+  setGrain(recommendedGrain())
+  await withPanelLoading(loadSeries)
+}
+
 function renderCharts() {
   const seriesMap = seriesPayload.value.series || {}
   for (const ch of chartDefs.value) {
@@ -328,6 +432,7 @@ function renderCharts() {
       charts[ch.itemId] = init(el)
     }
     const chart = charts[ch.itemId]
+    bindChartBrush(chart)
     const seriesKeys = Object.keys(seriesMap).filter((k) => k === ch.itemId || k.startsWith(ch.itemId + '|'))
     const series = seriesKeys.map((k) => {
       const pts = seriesMap[k] || []
@@ -348,6 +453,18 @@ function renderCharts() {
           return ch.unit === 'percent' ? `${n}%` : n
         }
       },
+      brush: {
+        toolbox: [],
+        xAxisIndex: 0,
+        brushLink: 'all',
+        brushStyle: {
+          borderWidth: 1,
+          color: 'rgba(64, 158, 255, 0.12)',
+          borderColor: '#409eff'
+        },
+        throttleType: 'debounce',
+        throttleDelay: 100
+      },
       legend: { type: 'scroll', top: 0 },
       grid: { left: 48, right: 16, top: 36, bottom: 28 },
       xAxis: { type: 'time' },
@@ -362,6 +479,7 @@ function renderCharts() {
       },
       series: series.length ? series : [{ type: 'line', data: [] }]
     }, true)
+    enableChartBrush(chart)
   }
 }
 
@@ -419,6 +537,12 @@ onBeforeUnmount(() => {
 .card-label { color: #6b7280; font-size: 12px; }
 .card-value { margin-top: 6px; font-size: 20px; font-weight: 600; }
 .charts { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 12px; }
+.brush-hint {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 12px;
+  color: #6b7280;
+}
 .chart-box { border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px 8px 4px; }
 .chart-title { font-size: 13px; color: #374151; padding: 0 4px 4px; }
 .chart { height: 220px; width: 100%; }

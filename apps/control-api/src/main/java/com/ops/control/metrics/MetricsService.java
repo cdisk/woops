@@ -21,6 +21,7 @@ public class MetricsService {
     private final AgentService agents;
     private final AssetRepository assets;
     private final MonitorDataRepository dataRepo;
+    private final MonitorTrendsRepository trendsRepo;
     private final MonitorLatestRepository latestRepo;
     private final MonitorItemDefRepository itemDefs;
     private final MetricAlertRuleRepository rules;
@@ -29,11 +30,13 @@ public class MetricsService {
     private final ControlAuditService audit;
     private final GroupService groups;
     private final JdbcTemplate jdbc;
+    private final MonitorProperties monitor;
 
     public MetricsService(
             AgentService agents,
             AssetRepository assets,
             MonitorDataRepository dataRepo,
+            MonitorTrendsRepository trendsRepo,
             MonitorLatestRepository latestRepo,
             MonitorItemDefRepository itemDefs,
             MetricAlertRuleRepository rules,
@@ -41,10 +44,12 @@ public class MetricsService {
             AssetAlertIgnoreRepository alertIgnores,
             ControlAuditService audit,
             GroupService groups,
-            JdbcTemplate jdbc) {
+            JdbcTemplate jdbc,
+            MonitorProperties monitor) {
         this.agents = agents;
         this.assets = assets;
         this.dataRepo = dataRepo;
+        this.trendsRepo = trendsRepo;
         this.latestRepo = latestRepo;
         this.itemDefs = itemDefs;
         this.rules = rules;
@@ -53,6 +58,7 @@ public class MetricsService {
         this.audit = audit;
         this.groups = groups;
         this.jdbc = jdbc;
+        this.monitor = monitor;
     }
 
     public record PointIn(String itemId, String instance, double value) {}
@@ -69,7 +75,7 @@ public class MetricsService {
 
         jdbc.batchUpdate(
                 """
-                insert into monitor_data (asset_id, item_id, instance, time, metric_value)
+                insert into monitor_history (asset_id, item_id, instance, time, metric_value)
                 values (?, ?, ?, ?, ?)
                 on conflict (asset_id, item_id, instance, time) do update set metric_value = excluded.metric_value
                 """,
@@ -169,7 +175,8 @@ public class MetricsService {
             itemIds = itemDefs.findByChartDefaultTrueOrderByItemIdAsc().stream()
                     .map(MonitorItemDefEntity::getItemId).toList();
         }
-        String g = effectiveGrain(grain, from, to);
+        boolean useTrends = useTrends(from, to);
+        String g = effectiveGrain(grain, from, to, useTrends);
         String inst = instance == null ? "" : instance;
         Map<String, List<Map<String, Object>>> series = new LinkedHashMap<>();
         Map<String, MonitorItemDefEntity> defs = new HashMap<>();
@@ -177,16 +184,29 @@ public class MetricsService {
             defs.put(d.getItemId(), d);
         }
         String placeholders = String.join(",", Collections.nCopies(itemIds.size(), "?"));
-        String sql = """
-                select item_id, date_trunc(?, time) as bucket, instance, avg(metric_value) as metric_value
-                from monitor_data
-                where asset_id = ? and item_id in (%s)
-                  and time >= ? and time < ?
-                  and (? = '' or instance = ?)
-                group by item_id, bucket, instance
-                order by item_id asc, bucket asc, instance asc
-                """.formatted(placeholders);
+        String sql;
         List<Object> args = new ArrayList<>();
+        if (useTrends) {
+            sql = """
+                    select item_id, date_trunc(?, hour) as bucket, instance, avg(avg_value) as metric_value
+                    from monitor_trends
+                    where asset_id = ? and item_id in (%s)
+                      and hour >= ? and hour < ?
+                      and (? = '' or instance = ?)
+                    group by item_id, bucket, instance
+                    order by item_id asc, bucket asc, instance asc
+                    """.formatted(placeholders);
+        } else {
+            sql = """
+                    select item_id, date_trunc(?, time) as bucket, instance, avg(metric_value) as metric_value
+                    from monitor_history
+                    where asset_id = ? and item_id in (%s)
+                      and time >= ? and time < ?
+                      and (? = '' or instance = ?)
+                    group by item_id, bucket, instance
+                    order by item_id asc, bucket asc, instance asc
+                    """.formatted(placeholders);
+        }
         args.add(g);
         args.add(assetId);
         args.addAll(itemIds);
@@ -222,18 +242,37 @@ public class MetricsService {
             m.put("unit", def != null ? def.getUnit() : "");
             meta.add(m);
         }
-        return Map.of(
-                "grain", g,
-                "from", from.toString(),
-                "to", to.toString(),
-                "items", meta,
-                "series", orderedSeries
-        );
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("grain", g);
+        out.put("source", useTrends ? "trends" : "history");
+        out.put("from", from.toString());
+        out.put("to", to.toString());
+        out.put("items", meta);
+        out.put("series", orderedSeries);
+        return out;
+    }
+
+    boolean useTrends(Instant from, Instant to) {
+        return useTrends(from, to, Instant.now(), monitor.detailRetentionDays());
+    }
+
+    /**
+     * History only keeps the recent retention window. Use trends when the requested
+     * range starts before that window (e.g. brush-select last month) or spans longer
+     * than retention — not merely when (to-from) looks "long".
+     */
+    static boolean useTrends(Instant from, Instant to, Instant now, int detailRetentionDays) {
+        Instant historyStart = now.minus(detailRetentionDays, ChronoUnit.DAYS);
+        if (from.isBefore(historyStart)) {
+            return true;
+        }
+        return Duration.between(from, to).compareTo(Duration.ofDays(detailRetentionDays)) > 0;
     }
 
     static String normalizeGrain(String grain) {
         if (grain == null) return "minute";
         return switch (grain.toLowerCase(Locale.ROOT)) {
+            case "hour" -> "hour";
             case "day" -> "day";
             case "month" -> "month";
             default -> "minute";
@@ -241,13 +280,18 @@ public class MetricsService {
     }
 
     static String effectiveGrain(String requested, Instant from, Instant to) {
+        return effectiveGrain(requested, from, to, false);
+    }
+
+    /**
+     * Honor the requested grain. Only rewrite when the source cannot serve it:
+     * trends have no minute points, so minute → hour.
+     * Defaults / recommendations belong to the UI, not forced here.
+     */
+    static String effectiveGrain(String requested, Instant from, Instant to, boolean useTrends) {
         String grain = normalizeGrain(requested);
-        Duration span = Duration.between(from, to);
-        if (span.compareTo(Duration.ofDays(180)) > 0) {
-            return "month";
-        }
-        if ("minute".equals(grain) && span.compareTo(Duration.ofDays(3)) > 0) {
-            return "day";
+        if (useTrends && "minute".equals(grain)) {
+            return "hour";
         }
         return grain;
     }
@@ -488,9 +532,43 @@ public class MetricsService {
     }
 
     @Transactional
-    public int purgeOlderThanThreeYears() {
-        Instant before = Instant.now().minus(365 * 3L, ChronoUnit.DAYS);
+    public int purgeHistoryOlderThanRetention() {
+        Instant before = Instant.now().minus(monitor.detailRetentionDays(), ChronoUnit.DAYS);
         return dataRepo.deleteOlderThan(before);
+    }
+
+    @Transactional
+    public int purgeTrendsOlderThanRetention() {
+        Instant before = Instant.now().minus(monitor.trendsRetentionDays(), ChronoUnit.DAYS);
+        return trendsRepo.deleteOlderThan(before);
+    }
+
+    /**
+     * Aggregate the previous completed UTC hour from monitor_history into monitor_trends.
+     * Idempotent via ON CONFLICT DO UPDATE.
+     */
+    @Transactional
+    public int rollupPreviousHour() {
+        Instant hourStart = Instant.now().truncatedTo(ChronoUnit.HOURS).minus(1, ChronoUnit.HOURS);
+        Instant hourEnd = hourStart.plus(1, ChronoUnit.HOURS);
+        return jdbc.update(
+                """
+                insert into monitor_trends (asset_id, item_id, instance, hour, min_value, max_value, avg_value, sample_count)
+                select asset_id, item_id, instance,
+                       ?::timestamptz as hour,
+                       min(metric_value), max(metric_value), avg(metric_value), count(*)::int
+                from monitor_history
+                where time >= ? and time < ?
+                group by asset_id, item_id, instance
+                on conflict (asset_id, item_id, instance, hour) do update set
+                  min_value = excluded.min_value,
+                  max_value = excluded.max_value,
+                  avg_value = excluded.avg_value,
+                  sample_count = excluded.sample_count
+                """,
+                Timestamp.from(hourStart),
+                Timestamp.from(hourStart),
+                Timestamp.from(hourEnd));
     }
 
     private static Instant parseTime(String collectedAt) {

@@ -37,6 +37,7 @@ go/agent.local.yaml
 
 # 本机私货说明（地址、部署备忘；勿提交）
 NOTES.local.md
+tmp/
 
 # OS
 .DS_Store
