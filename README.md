@@ -85,7 +85,50 @@ Teleport 也是出站隧道模型，偏零信任大平台；Woops 更偏「少�
 
 ## 快速开始
 
-### 0) 环境变量（必做）
+两套路：**A. 拉镜像部署**（推荐试用 / 生产服务器，无需 JDK/Go/Node）；**B. 本机编译开发**（改代码时用）。
+
+### A) 用 Docker Hub 镜像启动（推荐）
+
+前置：本机已装 **Docker** + **Docker Compose**，能访问 [Docker Hub](https://hub.docker.com/)（或已配置镜像加速 / 代理）。
+
+```bash
+# 1. 克隆仓库（只需 compose、证书脚本与 .env 模板）
+git clone https://gitee.com/cdisk/woops.git
+cd woops
+
+# 2. 环境变量
+cp .env.example .env          # Windows: copy .env.example .env
+# 按访问地址改 PUBLIC：
+#   OPS_CONSOLE_PUBLIC_HTTP=https://<你的IP或域名>
+#   OPS_GATEWAY_PUBLIC_HTTP=https://<同上>:9200
+#   OPS_GATEWAY_PUBLIC_WS=wss://<同上>:9200
+#   OPS_CONTROL_PUBLIC_HTTP=http://<同上>:9100
+# 生产务必改 OPS_JWT_SECRET / OPS_TICKET_SECRET / 管理员密码
+
+# 3. 拉镜像并启动（默认标签 0.1.0；可改 WOOPS_IMAGE_TAG=latest）
+#    若 deploy/tls/ 尚无证书，compose 的 tls-init 会按 .env 里 PUBLIC 地址自签，
+#    并把匹配的 SPKI pin 写入 deploy/compose-pin.env（覆盖 .env 里空/旧 pin）
+docker compose --env-file .env --profile full --profile desktop up -d
+```
+
+浏览器打开 `https://<你的地址>`（自签证书需信任一次）。默认账号：`admin` / `admin123`（首次登录须绑定 TOTP）。
+
+**证书说明：** 首次 `up` 前请把 `.env` 的 `OPS_*_PUBLIC_*` 改成实际访问的 IP/域名（自签 SAN 来自这些 URL）。已有公有 CA 或要自定义 SAN 时，可先跑 [`deploy/gen-gateway-tls.sh`](./deploy/gen-gateway-tls.sh) 再 `up`（已有 `gateway.crt`/`gateway.key` 则不会覆盖）。换域名后若浏览器/Agent 校验证书失败，删掉 `deploy/tls/gateway.*` 再 `up` 即可重签。
+
+镜像仓库：[`cdisk/woops-console`](https://hub.docker.com/r/cdisk/woops-console)、[`cdisk/woops-control-api`](https://hub.docker.com/r/cdisk/woops-control-api)、[`cdisk/woops-gateway`](https://hub.docker.com/r/cdisk/woops-gateway)。
+
+| 文件 | 用途 |
+|------|------|
+| 根目录 [`docker-compose.yml`](./docker-compose.yml) | **拉 Hub 镜像**部署（本小节） |
+| [`deploy/docker-compose.yml`](./deploy/docker-compose.yml) | **本机构建**镜像（开发 / 改 Dockerfile 时） |
+
+生产服务器也可把仓库放到 `/opt/ops`，`.env` 参考 [`deploy/env.prod.example`](./deploy/env.prod.example)，证书放 `deploy/tls/`（勿提交）。
+
+接入 Agent：控制台 → **资产** → 选分组 → **生成安装链接**（详见下方 **§4**）。
+
+---
+
+### 0) 环境变量（本机开发必做）
 
 ```powershell
 # 仓库根目录
@@ -95,7 +138,7 @@ copy .env.example .env
 
 `.env` / `.env.local` **不要提交**。生产可参考 [`deploy/env.prod.example`](./deploy/env.prod.example)。
 
-### 1) 前置
+### 1) 前置（本机编译）
 
 JDK 21、Maven、Node 20+、Docker（Postgres / 可选 guacd）、OpenSSL（生成自签证书时用）。
 
@@ -232,10 +275,12 @@ cd go
 
 Linux 用 `go/scripts/build-agent-linux.sh` 后在同机运行对应二进制。
 
-### 5) 全栈 Docker（可选）
+### 5) 全栈 Docker · 本机构建（可选）
+
+试用 / 生产优先用上文 **§A（拉镜像）**。只有需要改源码并当场打镜像时，才用 `deploy/` 构建：
 
 ```powershell
-# 必先做 §1.5：deploy/tls/ 有证书，且 .env 已填 pin（compose 挂载 deploy/tls）
+# 必先做 §1.5：deploy/tls/ 有证书，且 .env 已填 pin
 cd deploy
 docker compose --env-file ..\.env --profile full --profile desktop up -d --build
 ```
@@ -271,13 +316,14 @@ docker compose --env-file ..\.env --profile full --profile desktop up -d --build
 
 ```
 FEATURES.md          功能清单与进度（唯一约定源）
+docker-compose.yml   拉 Hub 镜像部署（快速启动 §A）
 .env.example         环境变量模板
 LICENSE              Apache-2.0
 apps/control-api     Java Spring Boot
 apps/console         Vue3 + Element Plus（en/zh）
 go/cmd/{gateway,agent,woopsctl}
 go/internal/opsctl   woopsctl 内部实现
-deploy/              docker-compose、Dockerfile、env.prod.example、gen-gateway-tls.sh
+deploy/              源码构建 compose、Dockerfile、env.prod.example、gen-gateway-tls.sh
 docs/                Agent 手动安装、woopsctl CI 说明、screenshots/ 界面截图
 ```
 

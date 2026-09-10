@@ -1,17 +1,18 @@
-# 根目录 `.env`：PUBLIC URL 与密钥（从 .env.example 复制，勿提交）。INTERNAL 由下方 environment 覆盖为 host 语义。
-# 服务器示例：/opt/ops/.env 可参考 deploy/env.prod.example；在 /opt/ops/deploy 下执行 compose。
-# 仅拉 Hub 镜像、不本地 build：用仓库根目录 docker-compose.yml（见 README §A）。
-# Gateway 使用 network_mode: host（9200/9201 + 端口池直绑宿主，无 docker-proxy）。
+# 用 Docker Hub 预构建镜像拉起全栈（无需本机编译）。
+# 源码构建请用 deploy/docker-compose.yml。
+#
+# 前置：仓库根目录 .env（从 .env.example 复制）。deploy/tls 无证书时 tls-init 会自签并写入 compose-pin.env。
+# 启动：docker compose --env-file .env --profile full --profile desktop up -d
+#
+# 镜像标签可用环境变量覆盖：WOOPS_IMAGE_TAG=0.1.0（默认）或 latest
 services:
   postgres:
-    # TimescaleDB: image + preload here; extension/hypertable/compression via control-api MetricsTimescaleBootstrap.
     image: timescale/timescaledb:2.29.2-pg16
     command: ["postgres", "-c", "shared_preload_libraries=timescaledb"]
     environment:
       POSTGRES_DB: ops
       POSTGRES_USER: ops
       POSTGRES_PASSWORD: ops
-    # 本机 control-api / 工具直连；full profile 容器内仍用服务名 postgres:5432
     ports:
       - "5432:5432"
     volumes:
@@ -23,72 +24,87 @@ services:
       retries: 10
     restart: unless-stopped
 
+  # One-shot: create deploy/tls/gateway.* if missing; always refresh compose-pin.env (SPKI).
+  tls-init:
+    profiles: ["full"]
+    image: alpine:3.20
+    env_file:
+      - .env
+    volumes:
+      - ./deploy/tls:/tls
+      - ./deploy/compose-pin.env:/out/pin.env
+      - ./deploy/ensure-gateway-tls.sh:/ensure-gateway-tls.sh:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - apk add --no-cache openssl >/dev/null && exec /bin/sh /ensure-gateway-tls.sh
+    restart: "no"
+
   control-api:
     profiles: ["full"]
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile.control-api
+    image: cdisk/woops-control-api:${WOOPS_IMAGE_TAG:-0.1.0}
     depends_on:
       postgres:
         condition: service_healthy
+      tls-init:
+        condition: service_completed_successfully
     env_file:
-      - ../.env
+      - .env
+      - ./deploy/compose-pin.env
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/ops
       SPRING_DATASOURCE_USERNAME: ops
       SPRING_DATASOURCE_PASSWORD: ops
-      # Gateway is on host network — reach via host-gateway (not container loopback).
       OPS_GATEWAY_INTERNAL_HTTP: http://host.docker.internal:9201
-      # Gateway JSONL spool + recordings; control-api tails it into server_operation_records.
       OPS_AUDIT_DIR: /data/ops-audit
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
       - "9100:9100"
     volumes:
-      - ../data/ops-audit:/data/ops-audit
+      - ./data/ops-audit:/data/ops-audit
     restart: unless-stopped
 
   gateway:
     profiles: ["full"]
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile.gateway
+    image: cdisk/woops-gateway:${WOOPS_IMAGE_TAG:-0.1.0}
     depends_on:
-      - control-api
+      tls-init:
+        condition: service_completed_successfully
+      control-api:
+        condition: service_started
     network_mode: host
     env_file:
-      - ../.env
+      - .env
+      - ./deploy/compose-pin.env
     environment:
-      # Host net: no Docker DNS; control-api/guacd publish to host.
       OPS_CONTROL_INTERNAL_HTTP: http://127.0.0.1:9100
       OPS_GUACD_ADDR: 127.0.0.1:4822
-      # guacd (bridge) dials back via host-gateway alias.
       OPS_GUAC_BRIDGE_HOST: host.docker.internal
       OPS_GATEWAY_TLS_CERT: /tls/gateway.crt
       OPS_GATEWAY_TLS_KEY: /tls/gateway.key
       OPS_AGENT_BIN_DIR: /app/bin
       OPS_AUDIT_DIR: /data/ops-audit
-    # No ports: — host network binds :9200/:9201 and portmap pool directly.
     volumes:
-      - ./tls:/tls:ro
-      - ../data/ops-audit:/data/ops-audit
+      - ./deploy/tls:/tls:ro
+      - ./data/ops-audit:/data/ops-audit
     restart: unless-stopped
 
   console:
     profiles: ["full"]
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile.console
+    image: cdisk/woops-console:${WOOPS_IMAGE_TAG:-0.1.0}
     depends_on:
-      - control-api
-      - gateway
+      tls-init:
+        condition: service_completed_successfully
+      control-api:
+        condition: service_started
+      gateway:
+        condition: service_started
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "443:443"    # HTTPS console (default https port)
+      - "443:443"
     volumes:
-      - ./tls:/tls:ro
+      - ./deploy/tls:/tls:ro
     restart: unless-stopped
 
   guacd:
@@ -100,11 +116,10 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "4822:4822"  # host-network gateway dials 127.0.0.1:4822
+      - "4822:4822"
     volumes:
       - guacd_home:/home/guacd
-      # Same spool root so guacd can write RDP/VNC recordings next to the events.
-      - ../data/ops-audit:/data/ops-audit
+      - ./data/ops-audit:/data/ops-audit
     restart: unless-stopped
 
 volumes:
