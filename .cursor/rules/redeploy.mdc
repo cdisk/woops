@@ -1,0 +1,41 @@
+---
+description: 用户说「重新部署」时的固定流程（17.30 + Docker Hub + compose 标签）
+alwaysApply: true
+---
+
+# 重新部署约定
+
+用户说 **「重新部署」** / **「部署一下」**（发布本次改动，而非仅本机 Vite）时，默认执行完整发布，不要只更新 17.30。
+
+## 目标
+
+1. **生产源码机** `root@10.255.17.30`：`/opt/ops`，用 `deploy/docker-compose.yml` **源码构建**重启受影响服务。
+2. **Docker Hub**：`cdisk/woops-{console,control-api,gateway}` 推送新版本标签 + `latest`。
+3. **仓库**：根目录 [`docker-compose.yml`](../../docker-compose.yml) 默认 `WOOPS_IMAGE_TAG`、README / FEATURES 中的默认标签与侧栏版本（`apps/console/package.json`）一并升到同一新版本。
+
+## 版本
+
+- 语义化补丁递增（如 `0.1.0` → `0.1.1`）；三组件共用同一 `WOOPS_IMAGE_TAG`。
+- 只改其中一个组件时：重建并推送该镜像；其余两个从上一版 **retag** 到新标签再 push，保证 Hub 上三仓标签齐套。
+- 本机构建/推送经代理：`HTTP_PROXY`/`HTTPS_PROXY=http://10.255.4.1:3128`，`DOCKER_BUILDKIT=1`。
+
+## 17.30 步骤（摘要）
+
+1. 打 `_deploy.tgz`（排除 `.git` / `.env*` / `deploy/tls` / `node_modules` / `target` / `go/bin` 等密钥与产物）。
+2. `scp` → `/opt/ops/_deploy.tgz`，远端 `tar xzf`。
+3. `cd /opt/ops/deploy && DOCKER_BUILDKIT=1 docker compose --env-file ../.env --profile full --profile desktop up -d --build --force-recreate --no-deps <services…>`  
+   只重建本次改动的服务（如仅 Web → `console`；Java → `control-api`；Go 数据面 → `gateway`）。
+4. 健康检查：`http://127.0.0.1:9100/api/health`、`https://127.0.0.1/`（按改动选）。
+
+## Hub 步骤（摘要）
+
+```text
+docker build -f deploy/Dockerfile.<svc> -t cdisk/woops-<svc>:$ver -t cdisk/woops-<svc>:latest .
+docker push cdisk/woops-<svc>:$ver && docker push cdisk/woops-<svc>:latest
+```
+
+未改动的服务：`docker tag …:旧版 …:$ver` 后同样 push `$ver` + `latest`。
+
+## 文档
+
+同一变更更新 FEATURES「最后更新」、compose/README 默认标签说明。不要另开进度文档。

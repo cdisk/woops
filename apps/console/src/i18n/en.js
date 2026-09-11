@@ -823,9 +823,16 @@ export default {
   deployToken: {
     create: 'Create token',
     downloadWoopsctl: 'Download woopsctl',
+    downloadTip:
+      'Stable public path (no auth): /bin/woopsctl/{os}/{arch}. Same-origin Console or Gateway https base both work. Copy the URL for wget/curl in CI.',
     downloadLinuxAmd64: 'Linux (amd64)',
     downloadLinuxArm64: 'Linux (arm64)',
     downloadWindowsAmd64: 'Windows (amd64)',
+    downloadFile: 'Download',
+    copyDownloadUrl: 'Copy URL',
+    copyWget: 'Copy wget/curl',
+    copiedDownloadUrl: 'Download URL copied',
+    copiedWget: 'Download command copied',
     downloadFailed: 'Download failed',
     downloadHttpFailed: 'Download failed (HTTP {status})',
     empty: 'No deploy tokens',

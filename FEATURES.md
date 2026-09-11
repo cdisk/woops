@@ -4,7 +4,7 @@
 > 任何功能新增、完成、搁置、行为变更，都必须先读本文件，并在同一变更中更新对应条目的状态与说明。  
 > README 只保留快速启动。历史设计稿 `bastion_architecture_design_*.plan.md` 不必再读。
 
-**最后更新：** 2026-09-10（compose tls-init 缺证自签）
+**最后更新：** 2026-09-11（Hub 镜像 0.1.1；重新部署=17.30+Hub+compose）
 
 ---
 
@@ -46,7 +46,7 @@
 |------|------|------|
 | `[x]` | Monorepo 骨架 | `apps/console`、`apps/control-api`、`go/{gateway,agent}`、`go/cmd/woopsctl`、`go/internal/opsctl`、`deploy/`；环境变量 `.env.example` → 本机 `.env`（不入库）+ README 编译/启动；许可证 Apache-2.0 |
 | `[x]` | PostgreSQL + TimescaleDB | Compose 用 **`timescale/timescaledb:2.29.2-pg16`**（监控依赖扩展；`command` 设 `shared_preload_libraries=timescaledb`）；Java 唯一写库；**不用 H2**。默认账密 `ops`/`ops`（生产务必改）；compose 映射宿主 `:5432` 给本机工具，公网靠防火墙关掉。**control-api 启动**幂等执行 `CREATE EXTENSION` / `create_hypertable` / 压缩策略（`MetricsTimescaleBootstrap`，打进 control-api 镜像） |
-| `[x]` | docker-compose 全栈 | **拉镜像**：根目录 [`docker-compose.yml`](docker-compose.yml) → Hub `cdisk/woops-{console,control-api,gateway}`（默认标签 `WOOPS_IMAGE_TAG=0.1.0`）；README §A 快速启动；**`tls-init`**：无 `deploy/tls/gateway.*` 时按 PUBLIC URL 自签，并刷新 [`deploy/compose-pin.env`](deploy/compose-pin.env)（SPKI，供 control-api/gateway）。**源码构建**：[`deploy/docker-compose.yml`](deploy/docker-compose.yml)。`deploy/env.prod.example`；服务器 `/opt/ops`；profiles `full`+`desktop`；**Gateway `network_mode: host`**；TLS 挂 `deploy/tls`（gitignore）；`Dockerfile.control-api` 用阿里云 Maven + BuildKit `/root/.m2` 缓存。full 另映射 control-api `:9100`、guacd `:4822`（公网靠防火墙） |
+| `[x]` | docker-compose 全栈 | **拉镜像**：根目录 [`docker-compose.yml`](docker-compose.yml) → Hub `cdisk/woops-{console,control-api,gateway}`（默认标签 `WOOPS_IMAGE_TAG=0.1.1`）；README §A 快速启动；**`tls-init`**：无 `deploy/tls/gateway.*` 时按 PUBLIC URL 自签，并刷新 [`deploy/compose-pin.env`](deploy/compose-pin.env)（SPKI，供 control-api/gateway）。**源码构建**：[`deploy/docker-compose.yml`](deploy/docker-compose.yml)。`deploy/env.prod.example`；服务器 `/opt/ops`（**10.255.17.30**）；profiles `full`+`desktop`；**Gateway `network_mode: host`**；TLS 挂 `deploy/tls`（gitignore）；`Dockerfile.control-api` 用阿里云 Maven + BuildKit `/root/.m2` 缓存。full 另映射 control-api `:9100`、guacd `:4822`（公网靠防火墙）。**「重新部署」**：见 `.cursor/rules/redeploy.mdc`（17.30 源码构建 + Hub 推送 `$ver`/`latest` + 升 compose 默认标签） |
 | `[x]` | guacd sidecar | `deploy/docker-compose.yml` → `guacamole/guacd:1.5.5`（发布宿主 `:4822`）；Gateway `OPS_GUACD_ADDR=127.0.0.1:4822`、`OPS_GUAC_BRIDGE_HOST=host.docker.internal`；console/control-api/guacd 配 `extra_hosts: host.docker.internal:host-gateway` |
 | `[x]` | `data/ops-audit/` 卷 | 运行态 JSONL **与会话录像**的本地根目录；`OPS_AUDIT_DIR`（默认 `./data/ops-audit`；Compose `/data/ops-audit` 同时挂 control-api / gateway / guacd）；已 gitignore |
 | `[ ]` | `openapi/` 契约 | Java REST → Vue TS client |
@@ -59,7 +59,7 @@
 | `[~]` | 协议兼容测试 / 集成测试 | `internal/protocol/control` open_session nested-params golden 已有；Agent→Gateway→echo / Testcontainers 仍缺 |
 | `[x]` | 运行时 | 控制面 **Java 21** + Spring Boot 3；Go **`go 1.20`**（模块最低版本；日常可用 Go 1.22+ 编译；legacy Agent 须 **`GOTOOLCHAIN=go1.20.14`**）；Vue 3 + Element Plus；图标 `@tabler/icons-vue` |
 | `[x]` | Console 中英 i18n | `vue-i18n`（`legacy:false`）；仅 `en`/`zh`；**默认英文**，`navigator.language` 以 `zh` 开头则中文；目录 `apps/console/src/i18n/{en,zh,index}.js`；`App.vue` 用 `el-config-provider` 同步 Element Plus locale；SFC `useI18n()`，纯 JS `import { t } from '…/i18n'`；控制台可见文案已迁入目录（含 Layout/Login/资产/用户/审计/会话/文件/桌面/端口映射/监控等） |
-| `[x]` | Console 视觉（冷静工程风） | 全局 `styles/{tokens,element-theme,base}.css`；主色 `#2F5D9F`、浅色底；字体 **IBM Plex Sans/Mono** 经 `@fontsource` **同源自托管**（无 Google Fonts CDN）；登录品牌首屏；Layout 侧栏图标+**顶栏显示当前页标题**（路由 `meta.titleKey`，页内不再重复大标题）；侧栏底部 **版本号**（`package.json` → `v0.1.0`）+ **源码链接**（`https://gitee.com/cdisk/woops`）；业务页筛选/操作留在内容区工具条；会话页顶栏抛光（桌面页保持暗色功能面）；**favicon** `public/favicon.svg`（主）+ `.ico` / apple-touch PNG；登录与侧栏品牌点同源 SVG |
+| `[x]` | Console 视觉（冷静工程风） | 全局 `styles/{tokens,element-theme,base}.css`；主色 `#2F5D9F`、浅色底；字体 **IBM Plex Sans/Mono** 经 `@fontsource` **同源自托管**（无 Google Fonts CDN）；登录品牌首屏；Layout 侧栏图标+**顶栏显示当前页标题**（路由 `meta.titleKey`，页内不再重复大标题）；侧栏底部 **版本号**（`package.json` → `v0.1.1`）+ **源码链接**（`https://gitee.com/cdisk/woops`）；业务页筛选/操作留在内容区工具条；会话页顶栏抛光（桌面页保持暗色功能面）；**favicon** `public/favicon.svg`（主）+ `.ico` / apple-touch PNG；登录与侧栏品牌点同源 SVG |
 | `[x]` | 共享资产树选择器 | `shared/AssetTreeSelect.vue` + `assetTree.js`：分组树 + 可选资产节点；**可搜索**（名称/主机名/公网·内网 IP）；分组不可选；端口映射创建与控制/操作/资产事件审计筛选共用 |
 
 ---
@@ -109,7 +109,7 @@
 | `[x]` | `GET /i/{code}/install.ps1` | Windows（Win10+）：`curl.exe -o $env:TEMP\…; powershell -File`；有 pin：`-k --pinnedpubkey`；源文件 `gateway/services/agentinstall/install.ps1` |
 | `[x]` | `GET /i/{code}/install.bat` | Windows legacy（Win7 / Server 2012）：纯 cmd、**ASCII-only REM**、**CRLF**；**手工安装**下载 `%TEMP%\install.bat`；**一键更新**下载 `%ProgramData%\woops-agent\install.bat` 再 `cmd /c call`；`LIVE=1` 时暂存 `woops-agent-new.exe` 后 `restart-update.bat` 异步重启；`agent.yaml` **整文件重写**为 ASCII 最小配置（禁止 findstr 合并 UTF-8/BOM，否则 `yaml: line 3`）；`asset-id` 用 `set /p` 复用；build &lt; 17763 自动下 WinPTY |
 | `[x]` | `GET /i/{code}/agent/{os}/{arch}` | 产物名 `woops-agent-{os}-{arch}`（`.exe`/`.gz`）；`-ldflags=-s -w -X main.Version=…`；可选旁路 `.gz`，安装脚本 `?format=gz` 优先（约 10MB→3MB 下载）；**Docker Gateway** 同步编 `linux/amd64` + `linux/arm64` + `windows/amd64`；gateway/Linux/woopsctl 用当前 Go，**Windows Agent 独立固定 Go 1.20.14**（Go 1.21+ 产物不能运行于 Win7 / Server 2012） |
-| `[x]` | `GET /bin/woopsctl/{os}/{arch}` | 公开下载（无需安装码）；产物 `woopsctl-{os}-{arch}`（Windows `.exe`）；**Docker Gateway** 同编 `linux/amd64` + `linux/arm64` + `windows/amd64`；Console 部署 Token 旁下拉；nginx/Vite 同源 `/bin/` 反代 Gateway |
+| `[x]` | `GET /bin/woopsctl/{os}/{arch}` | 公开下载（无需安装码）；产物 `woopsctl-{os}-{arch}`（Windows `.exe`）；**Docker Gateway** 同编 `linux/amd64` + `linux/arm64` + `windows/amd64`；Console 部署 Token 旁弹窗展示绝对 URL 并可复制；nginx/Vite 同源 `/bin/` 反代 Gateway |
 | `[x]` | install 脚本行为 | 先下载并校验，再更新 `agent.yaml`，原子写权限受限的旁路 `install-code`，最后启动 Agent；**注册由 Agent 完成**，脚本不再 POST/解析注册响应或写身份凭据。冷装等待最多 60s，确认 `asset-id`/`agent-token` 非空且安装码已消费；重装保留 `asset-id`，Agent 提交旧 id 以迁组并轮换 token；**在线更新**：`LIVE=1`（一键更新/Web Shell）始终延迟 stop→start，安装进程内不停活 agent，新进程自注册，Console 轮询重上线；优先 `systemd-run --no-block`，否则回退 `setsid`/`nohup`；Windows legacy CMD 用独立 `restart-update.bat`。Linux/PowerShell 保留本地 `proxy`/`proxyBridge` 配置；legacy BAT 对已有 YAML 原样保留，避免 UTF-8/BOM 与嵌套配置损坏。下载按 pin；Gateway 嵌入 agent SHA-256；依赖预检 curl/xxd/sha256sum；gzip 可选；已移除 `ops-agent` 迁移/回退 |
 | `[x]` | Agent HTTPS 自注册 | Agent 启动先起 pre-auth `proxy`/`proxyBridge`，读取旁路 `install-code`，经统一 Gateway HTTP client 调 `POST /api/agent/register`（Gateway 反代私网 control-api）；响应 `assetId`/`agentToken`/`reused`；可选旧 `assetId` 复用并轮换 token，同时按安装码 `groupId` 迁移分组；上报 hostname、详细 OS/arch、内网 IP、`agentVersion`。凭据临时文件 sync 后原子替换（Windows `MoveFileExW`），确认后删除安装码，无需重启直接进入 control/metrics；同一被拒安装码不轰炸，替换文件后恢复 |
 | `[x]` | Agent 验 Gateway | control / session / metrics（含 portmap 隧道）共用 TLS dialer；有 pin 时校 SPKI；无 pin 走系统 CA；假 Gateway / 错 pin 在握手失败，不发 `agent-token`；可选 `gatewayProxy` 时经 HTTP CONNECT 出站（目标 DNS 由代理解析） |
@@ -264,7 +264,7 @@
 | 状态 | 功能 | 说明 |
 |------|------|------|
 | `[x]` | `woopsctl` 二进制 | `go/cmd/woopsctl`（内部实现 `go/internal/opsctl`）：`upload` / `download` / `exec` / `forward` / `reverse`；env **`OPSCTL_CONFIG`** JSON（server/token/pin）；`server` 须 `https://`；pin 校 Gateway TLS；远端 exit code 透传；公开下载 `GET /bin/woopsctl/{os}/{arch}`（Docker 内置 linux amd64/arm64 + windows amd64） |
-| `[x]` | 部署 Token | 表 `deploy_tokens`：绑 **单资产**、可选 `remark`、`allow_upload`/`allow_download`/`allow_exec`/`allow_forward`/`allow_reverse`（五项独立；旧 `allow_portmap` 启动时迁移后删除）、`expires_at` 可空=无限期、吊销；forward/reverse 默认关闭；创建时返回 `opsctlConfig` / `opsctlConfigJson`（只一次）；SHA-256 存库；管理 API `/api/assets/{id}/deploy-tokens`；Console 资产详情 dialog 右侧面板（创建旁 **下载 woopsctl** Linux/Windows） |
+| `[x]` | 部署 Token | 表 `deploy_tokens`：绑 **单资产**、可选 `remark`、`allow_upload`/`allow_download`/`allow_exec`/`allow_forward`/`allow_reverse`（五项独立；旧 `allow_portmap` 启动时迁移后删除）、`expires_at` 可空=无限期、吊销；forward/reverse 默认关闭；创建时返回 `opsctlConfig` / `opsctlConfigJson`（只一次）；SHA-256 存库；管理 API `/api/assets/{id}/deploy-tokens`；Console 资产详情右侧 **下载 woopsctl** 弹窗展示固定公开 URL（`/bin/woopsctl/{os}/{arch}`），可复制链接 / wget·curl 命令 / 本机下载（linux amd64·arm64 + windows amd64） |
 | `[x]` | `woopsctl upload` / `download` / `exec` | Gateway 反代换票 → `/ws/file-transfer` 或 `/ws/exec`；上传下载与 Console 同一二进制协议（自动重连续传）；stderr 进度：换票/连接/已传总量/%/速度/已耗时/ETA（TTY 同行刷新）；Agent `sessions/exec` 流式输出；运行态：EXEC `OPERATION` + `RUN` ACTION（command/cwd/timeout，**不落 stdout/stderr**）+ END 带 `exitCode`/`durationMs` |
 | `[x]` | GitLab CI 示例与文档 | `docs/woopsctl-gitlab-ci.md` |
 

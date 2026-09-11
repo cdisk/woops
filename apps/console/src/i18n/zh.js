@@ -803,9 +803,16 @@ export default {
   deployToken: {
     create: '创建 Token',
     downloadWoopsctl: '下载 woopsctl',
+    downloadTip:
+      '固定公开路径（无需登录）：/bin/woopsctl/{os}/{arch}。控制台同源或 Gateway https 基址均可。复制链接后可在 CI 中 wget/curl。',
     downloadLinuxAmd64: 'Linux (amd64)',
     downloadLinuxArm64: 'Linux (arm64)',
     downloadWindowsAmd64: 'Windows (amd64)',
+    downloadFile: '下载',
+    copyDownloadUrl: '复制链接',
+    copyWget: '复制 wget/curl',
+    copiedDownloadUrl: '已复制下载链接',
+    copiedWget: '已复制下载命令',
     downloadFailed: '下载失败',
     downloadHttpFailed: '下载失败（HTTP {status}）',
     empty: '暂无部署 Token',

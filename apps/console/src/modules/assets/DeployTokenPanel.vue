@@ -2,21 +2,9 @@
   <div class="deploy-token-panel">
     <div class="panel-head">
       <h3>{{ t('assets.deployTokenSection') }}</h3>
-      <el-dropdown trigger="click" :disabled="downloading">
-        <el-button size="small" link type="primary" :loading="downloading">
-          {{ t('deployToken.downloadWoopsctl') }}
-          <el-icon v-if="!downloading" class="el-icon--right"><ArrowDown /></el-icon>
-        </el-button>
-        <template #dropdown>
-          <el-dropdown-menu>
-            <el-dropdown-item
-              v-for="item in woopsctlDownloads"
-              :key="item.key"
-              @click="downloadWoopsctl(item)"
-            >{{ item.label }}</el-dropdown-item>
-          </el-dropdown-menu>
-        </template>
-      </el-dropdown>
+      <el-button size="small" link type="primary" @click="downloadDialogVisible = true">
+        {{ t('deployToken.downloadWoopsctl') }}
+      </el-button>
     </div>
     <div class="toolbar">
       <el-button type="primary" size="small" @click="openCreate">{{ t('deployToken.create') }}</el-button>
@@ -132,13 +120,42 @@
         {{ t('deployToken.copyConfig') }}
       </el-button>
     </el-dialog>
+
+    <el-dialog
+      v-model="downloadDialogVisible"
+      :title="t('deployToken.downloadWoopsctl')"
+      width="720px"
+      destroy-on-close
+    >
+      <p class="download-tip">{{ t('deployToken.downloadTip') }}</p>
+      <div
+        v-for="item in woopsctlDownloads"
+        :key="item.key"
+        class="download-row"
+      >
+        <div class="download-meta">
+          <span class="download-label">{{ item.label }}</span>
+          <code class="download-url">{{ item.url }}</code>
+        </div>
+        <div class="download-actions">
+          <el-button size="small" @click="copyWoopsctlUrl(item)">{{ t('deployToken.copyDownloadUrl') }}</el-button>
+          <el-button size="small" @click="copyWoopsctlWget(item)">{{ t('deployToken.copyWget') }}</el-button>
+          <el-button
+            size="small"
+            type="primary"
+            :loading="downloadingKey === item.key"
+            :disabled="!!downloadingKey && downloadingKey !== item.key"
+            @click="downloadWoopsctl(item)"
+          >{{ t('deployToken.downloadFile') }}</el-button>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowDown } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../../shared/api'
 import { formatTime } from '../../shared/format'
@@ -155,11 +172,39 @@ const createVisible = ref(false)
 const creating = ref(false)
 const secretVisible = ref(false)
 const createdConfigJson = ref('')
+const downloadDialogVisible = ref(false)
+const downloadingKey = ref('')
+
+function woopsctlPublicUrl(os, arch) {
+  const origin = typeof window !== 'undefined' ? window.location.origin : ''
+  return `${origin}/bin/woopsctl/${os}/${arch}`
+}
 
 const woopsctlDownloads = computed(() => [
-  { key: 'linux-amd64', os: 'linux', arch: 'amd64', label: t('deployToken.downloadLinuxAmd64'), filename: 'woopsctl' },
-  { key: 'linux-arm64', os: 'linux', arch: 'arm64', label: t('deployToken.downloadLinuxArm64'), filename: 'woopsctl' },
-  { key: 'windows-amd64', os: 'windows', arch: 'amd64', label: t('deployToken.downloadWindowsAmd64'), filename: 'woopsctl.exe' }
+  {
+    key: 'linux-amd64',
+    os: 'linux',
+    arch: 'amd64',
+    label: t('deployToken.downloadLinuxAmd64'),
+    filename: 'woopsctl',
+    url: woopsctlPublicUrl('linux', 'amd64')
+  },
+  {
+    key: 'linux-arm64',
+    os: 'linux',
+    arch: 'arm64',
+    label: t('deployToken.downloadLinuxArm64'),
+    filename: 'woopsctl',
+    url: woopsctlPublicUrl('linux', 'arm64')
+  },
+  {
+    key: 'windows-amd64',
+    os: 'windows',
+    arch: 'amd64',
+    label: t('deployToken.downloadWindowsAmd64'),
+    filename: 'woopsctl.exe',
+    url: woopsctlPublicUrl('windows', 'amd64')
+  }
 ])
 
 const form = reactive({
@@ -172,15 +217,28 @@ const form = reactive({
   expiresAt: null
 })
 
-const downloading = ref(false)
+async function copyText(text, okMessage) {
+  await navigator.clipboard.writeText(text)
+  ElMessage.success(okMessage)
+}
+
+async function copyWoopsctlUrl(item) {
+  await copyText(item.url, t('deployToken.copiedDownloadUrl'))
+}
+
+async function copyWoopsctlWget(item) {
+  const cmd = item.os === 'windows'
+    ? `curl -fsSL "${item.url}" -o ${item.filename}`
+    : `wget -qO ${item.filename} "${item.url}" && chmod +x ${item.filename}`
+  await copyText(cmd, t('deployToken.copiedWget'))
+}
 
 async function downloadWoopsctl(item) {
-  if (downloading.value) return
-  downloading.value = true
-  const url = `/bin/woopsctl/${item.os}/${item.arch}`
+  if (downloadingKey.value) return
+  downloadingKey.value = item.key
   try {
     // fetch + blob avoids Chrome's flaky "network error" on synthetic <a download> for multi-MB files
-    const res = await fetch(url)
+    const res = await fetch(`/bin/woopsctl/${item.os}/${item.arch}`)
     if (!res.ok) {
       throw new Error(t('deployToken.downloadHttpFailed', { status: res.status }))
     }
@@ -196,7 +254,7 @@ async function downloadWoopsctl(item) {
   } catch (e) {
     ElMessage.error(e?.message || t('deployToken.downloadFailed'))
   } finally {
-    downloading.value = false
+    downloadingKey.value = ''
   }
 }
 
@@ -324,4 +382,42 @@ defineExpose({ reload })
 .form-tip { color: #6b7280; font-size: 12px; margin: 0 0 0 96px; }
 .warn { color: #b45309; font-size: 13px; margin: 0 0 12px; }
 .copy-btn { margin-top: 8px; }
+.download-tip {
+  margin: 0 0 16px;
+  color: #6b7280;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.download-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 0;
+  border-top: 1px solid #e5e7eb;
+}
+.download-row:last-child {
+  padding-bottom: 0;
+}
+.download-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.download-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: #111827;
+}
+.download-url {
+  font-size: 12px;
+  color: #374151;
+  word-break: break-all;
+  line-height: 1.4;
+}
+.download-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
 </style>

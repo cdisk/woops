@@ -23,7 +23,7 @@
 
 ## 2. 本地试跑
 
-从控制台「部署 Token」旁下载 **woopsctl**（Linux / Windows amd64），或直接拉取：
+从控制台「部署 Token」旁 **下载 woopsctl** 弹窗复制固定链接（或 wget/curl 命令），或直接拉取：
 
 ```bash
 # Gateway PUBLIC，或经 Console nginx 同源 /bin/
