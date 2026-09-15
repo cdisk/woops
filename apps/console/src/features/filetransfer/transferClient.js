@@ -286,6 +286,7 @@ export async function downloadFile({
   let lastErr = null
   let fingerprint = ''
   let total = 0
+  let savedName = fileName || 'download.bin'
 
   if (window.showSaveFilePicker) {
     try {
@@ -293,6 +294,7 @@ export async function downloadFile({
       const handle = await window.showSaveFilePicker({
         suggestedName: fileName || 'download.bin'
       })
+      if (handle?.name) savedName = handle.name
       writable = await handle.createWritable()
       useFsa = true
     } catch (e) {
@@ -343,9 +345,14 @@ export async function downloadFile({
               await writable.close()
             } else {
               const blob = new Blob(sinkChunks)
-              triggerBlobDownload(blob, fileName || 'download.bin')
+              triggerBlobDownload(blob, savedName)
             }
-            return { transferId: tid, size: total }
+            return {
+              transferId: tid,
+              size: total,
+              savedName,
+              saveMode: useFsa ? 'fsa' : 'blob'
+            }
           }
           if (ctrl.type === 'error') throw new Error(ctrl.message || t('filetransfer.downloadFailed'))
           if (ctrl.type === 'aborted') throw new Error(t('filetransfer.cancelled'))

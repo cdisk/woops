@@ -26,6 +26,9 @@
         :visible="showBusyMask"
         :text="busyMaskText"
         :detail="busyMaskDetail"
+        :meta="busyMaskMeta"
+        :done="!!downloadMask?.done"
+        @close="dismissDownloadMask"
       />
       <div class="path-bar">
         <el-input v-model="path" :placeholder="pathPlaceholder" @keyup.enter="refresh">
@@ -196,7 +199,8 @@ import FileEditDialog from './FileEditDialog.vue'
 import UploadTasksDialog from '../filetransfer/UploadTasksDialog.vue'
 import { isEditableTextFile } from '../filetransfer/textFiles'
 import { downloadToDisk } from '../filetransfer/fileDownload'
-import { formatMtime, formatSize } from './fileFormat'
+import { createRateMeter, resetRateMeter, sampleRate } from '../filetransfer/rateMeter'
+import { formatMtime, formatSize, formatSpeed, formatDuration } from './fileFormat'
 import { useUploadQueue } from '../filetransfer/uploadQueue'
 import { closeSessionTab, rewriteWs } from '../../session/sessionWs'
 import { joinPath as joinPathOs, joinRelative as joinRelativeOs, parentPath as parentPathOs, sortEntries } from './filePaths'
@@ -213,7 +217,8 @@ const path = ref('')
 const platform = ref('')
 const entries = ref([])
 const busy = ref(false)
-const downloadMask = ref(null) // { name, detail } while downloading
+const downloadMask = ref(null) // { name, detail, meta, done } while downloading / done
+let downloadDismissResolve = null
 const ready = ref(false)
 const dirLoading = ref(false)
 let dirLoadDepth = 0
@@ -268,6 +273,7 @@ const showBusyMask = computed(() => (
 const busyMaskText = computed(() => {
   if (status.value === 'connecting') return t('files.connecting')
   if (dirLoading.value) return t('files.loadingDir')
+  if (downloadMask.value?.done) return t('files.downloadComplete')
   if (downloadMask.value?.name) return t('files.downloading', { name: downloadMask.value.name })
   return t('common.processing')
 })
@@ -275,6 +281,24 @@ const busyMaskDetail = computed(() => {
   if (downloadMask.value?.detail) return downloadMask.value.detail
   return ''
 })
+const busyMaskMeta = computed(() => {
+  if (downloadMask.value?.meta) return downloadMask.value.meta
+  return ''
+})
+
+function dismissDownloadMask() {
+  downloadMask.value = null
+  busy.value = false
+  const resolve = downloadDismissResolve
+  downloadDismissResolve = null
+  resolve?.()
+}
+
+function waitDownloadDismiss() {
+  return new Promise((resolve) => {
+    downloadDismissResolve = resolve
+  })
+}
 
 function beginDirLoad() {
   dirLoadDepth += 1
@@ -484,47 +508,98 @@ async function removeRow(row) {
 async function downloadRow(row) {
   if (row.isDir) return
   busy.value = true
-  downloadMask.value = { name: row.name, detail: t('common.preparing') }
+  downloadMask.value = { name: row.name, detail: t('common.preparing'), meta: '', done: false }
+  const meter = createRateMeter()
+  let startedAt = 0
+  const setMask = (detail, meta = '') => {
+    downloadMask.value = { name: row.name, detail, meta, done: false }
+  }
+  const progressLines = (loaded, total, speed) => {
+    const now = Date.now()
+    const elapsed = startedAt ? formatDuration(now - startedAt) : '0s'
+    if (total > 0) {
+      const pct = Math.min(100, Math.round((loaded / total) * 100))
+      const remain = Math.max(0, total - loaded)
+      const eta = remain <= 0
+        ? '0s'
+        : (speed > 0 ? formatDuration((remain / speed) * 1000) : t('common.emDash'))
+      return {
+        detail: t('files.downloadBytes', {
+          loaded: formatSize(loaded),
+          total: formatSize(total),
+          pct
+        }),
+        meta: t('files.downloadMeta', {
+          speed: formatSpeed(speed),
+          elapsed,
+          eta
+        })
+      }
+    }
+    return {
+      detail: t('files.received', { size: formatSize(loaded) }),
+      meta: t('files.downloadMetaUnknown', {
+        speed: formatSpeed(speed),
+        elapsed
+      })
+    }
+  }
   try {
-    await downloadToDisk({
+    const result = await downloadToDisk({
       assetId: assetId.value,
       remotePath: entryPath(row),
       fileName: row.name,
       onProgress: (p) => {
         if (p.phase === 'pick-save') {
-          downloadMask.value = { name: row.name, detail: t('files.chooseSaveLocation') }
+          setMask(t('files.chooseSaveLocation'))
           return
         }
         const total = Number(p.total) || 0
         const loaded = Number(p.loaded) || 0
+        const now = Date.now()
         if (p.status === 'retrying') {
-          downloadMask.value = {
-            name: row.name,
-            detail: total > 0
+          if (!startedAt) startedAt = now
+          resetRateMeter(meter, loaded, now)
+          setMask(
+            total > 0
               ? t('files.resumeTransfer', { loaded: formatSize(loaded), total: formatSize(total) })
               : t('files.resumeTransferEllipsis')
-          }
+          )
           return
+        }
+        if (!startedAt || (p.phase === 'start' && loaded === 0)) {
+          startedAt = now
+          resetRateMeter(meter, loaded, now)
         }
         if (p.phase === 'start' && loaded === 0) {
-          downloadMask.value = {
-            name: row.name,
-            detail: total > 0
+          setMask(
+            total > 0
               ? t('files.transferProgressZero', { total: formatSize(total) })
               : t('files.transferStart')
-          }
+          )
           return
         }
-        const pct = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0
-        downloadMask.value = {
-          name: row.name,
-          detail: total > 0
-            ? `${formatSize(loaded)} / ${formatSize(total)} (${pct}%)`
-            : t('files.received', { size: formatSize(loaded) })
-        }
+        const speed = sampleRate(meter, loaded, now)
+        const lines = progressLines(loaded, total, speed)
+        setMask(lines.detail, lines.meta)
       }
     })
+    if (!result) return
+    const elapsed = startedAt ? formatDuration(Date.now() - startedAt) : '0s'
+    downloadMask.value = {
+      name: row.name,
+      done: true,
+      detail: t('files.downloadDoneMeta', {
+        size: formatSize(result.size || 0),
+        elapsed
+      }),
+      meta: ''
+    }
+    await waitDownloadDismiss()
   } finally {
+    if (downloadDismissResolve) {
+      downloadDismissResolve = null
+    }
     busy.value = false
     downloadMask.value = null
   }

@@ -25,11 +25,23 @@
       </div>
       <div class="panel table-wrap">
         <el-table :data="summary.abnormalAssets || []" size="small" stripe :empty-text="t('home.emptyAbnormal')">
-          <el-table-column prop="displayName" :label="t('common.name')" min-width="140" show-overflow-tooltip />
+          <el-table-column prop="displayName" :label="t('common.name')" min-width="140" show-overflow-tooltip>
+            <template #default="{ row }">
+              <button type="button" class="link-btn" @click="goAsset(row)">
+                {{ row.displayName || t('common.emDash') }}
+              </button>
+            </template>
+          </el-table-column>
           <el-table-column prop="hostname" :label="t('home.hostname')" min-width="120" show-overflow-tooltip />
           <el-table-column :label="t('common.group')" width="120" show-overflow-tooltip>
             <template #default="{ row }">
-              {{ row.groupId ? (row.groupName || t('common.emDash')) : t('common.ungrouped') }}
+              <button
+                v-if="row.groupId"
+                type="button"
+                class="link-btn"
+                @click="goGroup(row)"
+              >{{ row.groupName || t('common.emDash') }}</button>
+              <span v-else>{{ t('common.ungrouped') }}</span>
             </template>
           </el-table-column>
           <el-table-column :label="t('common.status')" width="90">
@@ -72,16 +84,28 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../../shared/api'
 import IgnoredAlertsDialog from './IgnoredAlertsDialog.vue'
 
 const { t } = useI18n()
+const router = useRouter()
 
 const loading = ref(false)
 const summary = ref({})
 const ignoreVisible = ref(false)
 const ignoredCount = computed(() => (summary.value.ignoredAlerts || []).length)
+
+function goAsset(row) {
+  const q = String(row.displayName || row.hostname || '').trim()
+  router.push({ path: '/assets', query: q ? { q } : {} })
+}
+
+function goGroup(row) {
+  if (!row.groupId) return
+  router.push({ path: '/assets', query: { groupId: String(row.groupId) } })
+}
 
 function issuesOf(row) {
   if (Array.isArray(row.issues) && row.issues.length) return row.issues
@@ -208,5 +232,25 @@ onMounted(load)
   flex-wrap: wrap;
   gap: 6px;
   padding: 4px 0;
+}
+
+.link-btn {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+  color: var(--el-color-primary);
+  font: inherit;
+  cursor: pointer;
+  text-align: left;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.link-btn:hover {
+  color: var(--el-color-primary-light-3);
 }
 </style>

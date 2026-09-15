@@ -59,6 +59,25 @@
               </div>
             </template>
           </el-table-column>
+          <el-table-column :label="t('assets.alerts')" width="72" align="center">
+            <template #default="{ row }">
+              <el-tooltip
+                v-if="alertCount(row) > 0"
+                placement="top"
+                :show-after="200"
+              >
+                <template #content>
+                  <div class="alert-tip">
+                    <div v-for="issue in alertIssues(row)" :key="issue.itemId + ':' + (issue.instance || '')">
+                      {{ issueLabel(issue) }}
+                    </div>
+                  </div>
+                </template>
+                <el-tag type="danger" size="small" class="alert-count-tag">{{ alertCount(row) }}</el-tag>
+              </el-tooltip>
+              <span v-else class="alert-none">{{ t('common.emDash') }}</span>
+            </template>
+          </el-table-column>
           <el-table-column prop="agentVersion" :label="t('assets.agentVersion')" width="120" show-overflow-tooltip>
             <template #default="{ row }">{{ row.agentVersion || t('common.emDash') }}</template>
           </el-table-column>
@@ -195,8 +214,9 @@ set "https_proxy=http://proxyuser:changeme@10.0.0.1:3128"
 </template>
 
 <script setup>
-import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import {
   IconChevronDown,
@@ -213,8 +233,10 @@ import GroupTree, { ALL_KEY } from './GroupTree.vue'
 import AssetDetail from './AssetDetail.vue'
 
 const { t, locale } = useI18n()
+const route = useRoute()
 
 const assets = ref([])
+const alertByAssetId = ref({})
 const searchQuery = ref('')
 const loading = ref(false)
 const selectedKey = ref(ALL_KEY)
@@ -237,7 +259,7 @@ const installNow = ref(Date.now())
 const curlTipOpen = ref(false)
 const proxyTipOpen = ref(false)
 let installCountdownTimer = null
-let assetsPollTimer = null
+let applyingRouteQuery = false
 
 const installRemainMs = computed(() => {
   if (!installExpiresAt.value) return 0
@@ -295,6 +317,44 @@ const filteredAssets = computed(() => {
   )
 })
 
+function alertEntry(row) {
+  return alertByAssetId.value[String(row.id)] || null
+}
+
+function alertIssues(row) {
+  const entry = alertEntry(row)
+  return Array.isArray(entry?.issues) ? entry.issues : []
+}
+
+function alertCount(row) {
+  return alertIssues(row).length
+}
+
+function issueLabel(issue) {
+  if (!issue) return ''
+  if (issue.kind === 'offline' || issue.itemId === 'host.online') return t('common.offline')
+  return issue.label || issue.itemId
+}
+
+function applyRouteQuery() {
+  applyingRouteQuery = true
+  try {
+    const q = route.query.q
+    searchQuery.value = typeof q === 'string' ? q : ''
+    const gid = route.query.groupId
+    if (typeof gid === 'string' && gid) {
+      selectedKey.value = gid
+      const sub = route.query.includeSubtree
+      showSubtree.value = sub === 'true' || sub === '1'
+    } else {
+      selectedKey.value = ALL_KEY
+      showSubtree.value = false
+    }
+  } finally {
+    applyingRouteQuery = false
+  }
+}
+
 function syncSelectedGroupName() {
   if (selectedKey.value === ALL_KEY) {
     selectedGroupName.value = ''
@@ -305,6 +365,7 @@ function syncSelectedGroupName() {
 }
 
 function onGroupChange() {
+  if (applyingRouteQuery) return
   syncSelectedGroupName()
   loadAssets()
 }
@@ -326,6 +387,22 @@ function openDetail(row) {
   detailVisible.value = true
 }
 
+async function loadAlerts() {
+  try {
+    const { data } = await api.get('/dashboard/summary')
+    const map = {}
+    for (const a of data?.abnormalAssets || []) {
+      if (a?.assetId) map[String(a.assetId)] = a
+    }
+    alertByAssetId.value = map
+  } catch (e) {
+    if (e?.response?.status === 401 || e?.response?.data?.error === 'unauthorized') {
+      return
+    }
+    // Keep last known map; list still usable without alerts.
+  }
+}
+
 async function loadAssets() {
   loading.value = true
   try {
@@ -334,7 +411,10 @@ async function loadAssets() {
       params.groupId = selectedKey.value
       if (showSubtree.value) params.includeSubtree = true
     }
-    const { data } = await api.get('/assets', { params })
+    const [{ data }] = await Promise.all([
+      api.get('/assets', { params }),
+      loadAlerts()
+    ])
     assets.value = sortAssets(data || [])
   } catch (e) {
     assets.value = []
@@ -404,16 +484,21 @@ async function copyText(text) {
   ElMessage.success(t('common.copied'))
 }
 
+watch(
+  () => [route.query.q, route.query.groupId, route.query.includeSubtree],
+  async () => {
+    applyRouteQuery()
+    syncSelectedGroupName()
+    await loadAssets()
+  }
+)
+
 onMounted(async () => {
+  applyRouteQuery()
   await reloadAll()
-  assetsPollTimer = setInterval(loadAssets, 15000)
 })
 onBeforeUnmount(() => {
   stopInstallCountdown()
-  if (assetsPollTimer != null) {
-    clearInterval(assetsPollTimer)
-    assetsPollTimer = null
-  }
 })
 </script>
 
@@ -462,6 +547,10 @@ onBeforeUnmount(() => {
 .os-cell { display: flex; align-items: center; min-width: 0; gap: 6px; }
 .os-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .proto { flex-shrink: 0; }
+.alert-count-tag { cursor: default; min-width: 22px; justify-content: center; }
+.alert-none { color: var(--ops-text-secondary); }
+.alert-tip { line-height: 1.45; max-width: 280px; }
+.alert-tip div + div { margin-top: 4px; }
 .row-actions {
   align-items: center;
   justify-content: flex-end;
