@@ -7,8 +7,14 @@
   >
     <p class="hint">{{ t('home.ignoredHint') }}</p>
     <el-table :data="rows" size="small" stripe :empty-text="t('home.emptyIgnored')" max-height="420">
-      <el-table-column prop="displayName" :label="t('common.name')" min-width="140" show-overflow-tooltip />
-      <el-table-column prop="hostname" :label="t('home.hostname')" min-width="120" show-overflow-tooltip />
+      <el-table-column :label="t('common.name')" min-width="160" show-overflow-tooltip>
+        <template #default="{ row }">
+          <div class="stack-cell">
+            <div class="stack-primary">{{ row.displayName || t('common.emDash') }}</div>
+            <div class="stack-secondary">{{ row.hostname || t('common.emDash') }}</div>
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column :label="t('common.group')" width="120" show-overflow-tooltip>
         <template #default="{ row }">
           {{ row.groupId ? (row.groupName || t('common.emDash')) : t('common.ungrouped') }}
@@ -72,5 +78,30 @@ async function unignore(row) {
   margin: 0 0 12px;
   color: var(--ops-text-secondary);
   font-size: 13px;
+}
+.stack-cell {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0;
+  min-width: 0;
+  line-height: 1.15;
+  padding: 1px 0;
+}
+.stack-primary {
+  font-size: inherit;
+  font-weight: inherit;
+  color: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stack-secondary {
+  margin-top: 1px;
+  font-size: 10px;
+  color: #b6c0cc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

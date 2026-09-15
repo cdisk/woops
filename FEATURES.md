@@ -4,7 +4,7 @@
 > 任何功能新增、完成、搁置、行为变更，都必须先读本文件，并在同一变更中更新对应条目的状态与说明。  
 > README 只保留快速启动。历史设计稿 `bastion_architecture_design_*.plan.md` 不必再读。
 
-**最后更新：** 2026-09-15（下载进度补速度/耗时/ETA；Hub 0.1.2）
+**最后更新：** 2026-09-15（资产列表紧凑双行列 + 前端排序；Hub 0.1.2）
 
 ---
 
@@ -95,7 +95,7 @@
 | `[x]` | ServerGroup 树 + 移动资产 | 表 `server_groups`；`GET/POST/PATCH/DELETE /api/groups`；资产 `?groupId=` / `?includeSubtree=` / `?rootOnly=`；控制台 `GroupTree.vue`：「全部」为顶（旁「+分组」建一级）、其下各级（旁「+分组」拆分下拉：点建子组，下拉重命名/删除）；右侧「显示所有」勾选后含子孙组资产（默认仅本级） |
 | `[ ]` | Credential 密文库 | AES-GCM + 主密钥；网关按票据取一次性凭据。**现** `desktop_password` 半明文；待做见 §9 |
 | `[x]` | ACL：用户可见范围 | `user_scopes`（`GROUP`/`ASSET`）；勾组含子树；单资产仅用不可删（详情 `canDelete`）；祖先组动态计算只读展示；角色×范围：可见≠可管（不可删/不可发安装码）；**可见=可开全部会话协议**（Shell/文件/桌面/exec），不做协议/动作细 ACL |
-| `[x]` | 资产列表 / 详情 / 删除 | 列表顶栏本地搜索（名称/主机名/公网 IP/内网 IP 任意子串；支持深链 `?q=`）；左侧分组支持深链 `?groupId=`（可选 `includeSubtree=`）；保留会话/监控操作；列表**不再自动轮询**（点顶栏刷新或切换分组/搜索深链时再拉）；「详情」弹 dialog（非独立路由）：顶栏改显示名、跳转审计（操作/控制/资产事件，`?assetId=`）、**一键更新**（任何角色可用，可见资产即可；`POST /assets/{id}/agent-update` 发分组安装码并记控制审计 `UPDATE_AGENT`/「版本更新」，再用户 `exec` 票据跑安装命令，弹窗流式日志；**exec 结束后每 1s 轮询资产**，确认重新上线且 `agentVersion` 变化并刷新详情/列表版本号，最多约 120s；未分组/未保存分组变更/离线则拒绝；**更新命令自带代理前缀**：exec 环境无代理，故命令先从目标机 `agent.yaml` 读 `gatewayProxy` 并 `export https_proxy` 等（Linux `/etc/woops-agent/`，Windows `%ProgramData%\woops-agent\`），网闸后主机才能 curl 到 Gateway；读盘而非问 Agent；不回显代理值，避免泄露 user:pass）、RDP/VNC 桌面凭据与分组、左端口映射右部署 Token、可删资产（须输入显示名确认，提示中名称加粗红色）；顶栏按钮：审计+一键更新+删除一组、**保存单独**；无密码提醒；`DELETE` 仅超管/管理员且须在 scope；列表显示 `agentVersion`；**Agent 版本前**窄列「监控」：有异常时 danger tag 显示条数，悬停 tip 列明细（复用 `GET /dashboard/summary` 的 `abnormalAssets`，含离线） |
+| `[x]` | 资产列表 / 详情 / 删除 | 列表顶栏本地搜索（名称/主机名/公网 IP/内网 IP 任意子串；支持深链 `?q=`）；左侧分组支持深链 `?groupId=`（可选 `includeSubtree=`）；保留会话/监控操作；列表**不再自动轮询**（点顶栏刷新或切换分组/搜索深链时再拉）；列表紧凑列：**名称+主机名**、**内网 IP+公网 IP** 各一列两行（上行主文、下行小灰字、行距紧）；表头可前端排序：名称、在线、内网 IP、分组、系统、监控、Agent 版本；「详情」弹 dialog（非独立路由）：顶栏改显示名、跳转审计（操作/控制/资产事件，`?assetId=`）、**一键更新**（任何角色可用，可见资产即可；`POST /assets/{id}/agent-update` 发分组安装码并记控制审计 `UPDATE_AGENT`/「版本更新」，再用户 `exec` 票据跑安装命令，弹窗流式日志；**exec 结束后每 1s 轮询资产**，确认重新上线且 `agentVersion` 变化并刷新详情/列表版本号，最多约 120s；未分组/未保存分组变更/离线则拒绝；**更新命令自带代理前缀**：exec 环境无代理，故命令先从目标机 `agent.yaml` 读 `gatewayProxy` 并 `export https_proxy` 等（Linux `/etc/woops-agent/`，Windows `%ProgramData%\woops-agent\`），网闸后主机才能 curl 到 Gateway；读盘而非问 Agent；不回显代理值，避免泄露 user:pass）、RDP/VNC 桌面凭据与分组、左端口映射右部署 Token、可删资产（须输入显示名确认，提示中名称加粗红色）；顶栏按钮：审计+一键更新+删除一组、**保存单独**；无密码提醒；`DELETE` 仅超管/管理员且须在 scope；列表显示 `agentVersion`；**Agent 版本前**窄列「监控」：有异常时 danger tag 显示条数，悬停 tip 列明细（复用 `GET /dashboard/summary` 的 `abnormalAssets`，含离线） |
 | `[x]` | 桌面凭据字段 | 统一 `desktop_port` / `desktop_username` / `desktop_password`；Win 首装默认 3389/`Administrator`，Linux 默认 5900/空用户名；资产详情可改（**可见即可改密码**）；列表/详情 API **不**回传密码明文（仅 `hasDesktopPassword`）；开票始终读库；已删除 `ssh_*`；**RDP 另存** `desktop_color_depth`（8/16/24/32，默认 **16**；Guacamole 无 15 位）与 `desktop_rdp_quality`（`low`/`medium`/`high`，默认 **`low`** 关壁纸/主题/字体平滑等） |
 
 ---
@@ -121,7 +121,7 @@
 | `[x]` | 监控 Timescale history + trends | **`monitor_history`**（分钟明细 hypertable，近 **7** 天可配）+ **`monitor_trends`**（小时 `min/max/avg/sample_count`，保留 **3** 年可配）；字典 `monitor_item_def`；每小时汇集上一小时并删除超期明细；压缩策略由启动引导自动加；旧表名 `monitor_data` 已迁完 |
 | `[x]` | 监控曲线 / 聚合 | `GET …/metrics/series`；grain=minute\|hour\|day\|month；选表：起点在明细保留窗内且跨度≤保留窗 → history，否则 trends；**UI 默认按点数**：≤3 日按分、≤90 日按小时、更长（含 1 年）按日、>3 年按月；**手动选择优先**；后端仅在 trends 无法提供「按分」时改写为小时；多指标合并单次 SQL |
 | `[x]` | 监控预警 | 全局阈值（优先 %）；入库评估；`asset_alert_status`；配置 CRUD；**仅超管**可见菜单与 API。首页异常含离线；忽略按 **资产+监控项**（`asset_alert_ignores`，离线项 `host.online`） |
-| `[x]` | 首页概览 | 资产总数 / 在线 / 异常（**含离线**，与监控预警并列）；登录进首页。异常按监控项可 **忽略 / 取消忽略**（如只忽略离线或 CPU，不影响该资产其他项；忽略后不占异常列表；「异常资产」标题右侧打开已忽略弹窗 `IgnoredAlertsDialog`；可见资产即可操作；控制审计 `MONITOR`/`IGNORE`/`UNIGNORE`）。异常列表与已忽略清单均展示 **分组**（`groupId`/`groupName`，未分组显示「未分组」；已忽略弹窗加宽）。异常列表 **名称**可点 → `/assets?q=`（顶栏搜索预填，本地过滤）；**分组**可点 → `/assets?groupId=`（左侧树选中该组；未分组不可点） |
+| `[x]` | 首页概览 | 资产总数 / 在线 / 异常（**含离线**，与监控预警并列）；登录进首页。异常按监控项可 **忽略 / 取消忽略**（如只忽略离线或 CPU，不影响该资产其他项；忽略后不占异常列表；「异常资产」标题右侧打开已忽略弹窗 `IgnoredAlertsDialog`；可见资产即可操作；控制审计 `MONITOR`/`IGNORE`/`UNIGNORE`）。异常列表与已忽略清单均展示 **分组**（`groupId`/`groupName`，未分组显示「未分组」；已忽略弹窗加宽）；**名称+主机名**合成一列两行（名称可点 → `/assets?q=`；主机名小灰字）；**分组**可点 → `/assets?groupId=`（左侧树选中该组；未分组不可点） |
 | `[x]` | 资产监控页 | 操作「监控」→ 新浏览器标签 `/assets/:id/monitor`（无侧栏，同会话页）；复用 `AssetMonitorPanel`；顶部规格；各图下最高/平均/最低；时间范围快捷：5 分钟 / 30 分钟 / 1 小时 / 6 小时 / 1 天 / 7 天 / 30 天 / 90 天 / 1 年；图表横向框选时间后按该范围重载全部曲线并自适应 grain；标题左侧关闭（有 opener 则关标签）；首屏 items/latest/series 并行加载，ECharts 按需打包 |
 | `[~]` | 资产列表指标摘要 | 已做异常条数 tag（见上「资产列表」监控列，数据来自 dashboard summary）；完整 `monitor_latest` 指标数值摘要未做 |
 | `[x]` | Agent 内置 HTTP 正向代理 | 插件式 `go/internal/agent/plugins/proxy`：`TryStart` 软失败不影响控制面；`agent.yaml` `proxy.*`（enabled/listen/username/password/allowCIDRs/allowGlobal）；CONNECT + forward；账密强制；来源 CIDR；`allowGlobal=false` 仅 ops host（`gateway` 主机 :gwPort+`:9100`）；全局时拒 loopback/元数据；**有 `gatewayProxy` 时入站出站经上游 CONNECT/forward 串联**（防环：拒连上游自身） |

@@ -151,6 +151,7 @@ export default {
     onlineCol: 'Online',
     publicIp: 'Public IP',
     privateIp: 'Private IP',
+    ipCol: 'IP',
     os: 'OS',
     alerts: 'Alerts',
     agentVersion: 'Agent version',

@@ -149,6 +149,7 @@ export default {
     onlineCol: '在线',
     publicIp: '公网 IP',
     privateIp: '内网 IP',
+    ipCol: 'IP',
     os: '系统',
     alerts: '监控',
     agentVersion: 'Agent 版本',

@@ -25,14 +25,16 @@
       </div>
       <div class="panel table-wrap">
         <el-table :data="summary.abnormalAssets || []" size="small" stripe :empty-text="t('home.emptyAbnormal')">
-          <el-table-column prop="displayName" :label="t('common.name')" min-width="140" show-overflow-tooltip>
+          <el-table-column :label="t('common.name')" min-width="160" show-overflow-tooltip>
             <template #default="{ row }">
-              <button type="button" class="link-btn" @click="goAsset(row)">
-                {{ row.displayName || t('common.emDash') }}
-              </button>
+              <div class="stack-cell">
+                <button type="button" class="link-btn stack-primary" @click="goAsset(row)">
+                  {{ row.displayName || t('common.emDash') }}
+                </button>
+                <div class="stack-secondary">{{ row.hostname || t('common.emDash') }}</div>
+              </div>
             </template>
           </el-table-column>
-          <el-table-column prop="hostname" :label="t('home.hostname')" min-width="120" show-overflow-tooltip />
           <el-table-column :label="t('common.group')" width="120" show-overflow-tooltip>
             <template #default="{ row }">
               <button
@@ -252,5 +254,30 @@ onMounted(load)
 
 .link-btn:hover {
   color: var(--el-color-primary-light-3);
+}
+
+.stack-cell {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0;
+  min-width: 0;
+  line-height: 1.15;
+  padding: 1px 0;
+}
+
+.stack-primary {
+  font-size: inherit;
+  font-weight: inherit;
+  max-width: 100%;
+}
+
+.stack-secondary {
+  margin-top: 1px;
+  font-size: 10px;
+  color: #b6c0cc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

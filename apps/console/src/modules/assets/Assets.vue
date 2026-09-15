@@ -35,21 +35,33 @@
           </div>
         </div>
         <el-table :data="filteredAssets" v-loading="loading" stripe height="100%">
-          <el-table-column prop="displayName" :label="t('common.name')" min-width="120" show-overflow-tooltip />
-          <el-table-column prop="hostname" :label="t('assets.hostname')" min-width="120" show-overflow-tooltip />
-          <el-table-column :label="t('assets.group')" width="120" show-overflow-tooltip>
+          <el-table-column :label="t('common.name')" min-width="140" show-overflow-tooltip sortable :sort-method="sortByName">
+            <template #default="{ row }">
+              <div class="stack-cell">
+                <div class="stack-primary">{{ row.displayName || t('common.emDash') }}</div>
+                <div class="stack-secondary">{{ row.hostname || t('common.emDash') }}</div>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('assets.group')" width="100" show-overflow-tooltip sortable :sort-method="sortByGroup">
             <template #default="{ row }">
               {{ row.groupId ? (row.groupName || t('common.emDash')) : t('common.ungrouped') }}
             </template>
           </el-table-column>
-          <el-table-column :label="t('assets.onlineCol')" width="80">
+          <el-table-column :label="t('assets.onlineCol')" width="88" sortable :sort-method="sortByOnline">
             <template #default="{ row }">
               <el-tag :type="row.online ? 'success' : 'info'" size="small">{{ row.online ? t('common.online') : t('common.offline') }}</el-tag>
             </template>
           </el-table-column>
-          <el-table-column prop="publicIp" :label="t('assets.publicIp')" width="140" show-overflow-tooltip />
-          <el-table-column prop="privateIp" :label="t('assets.privateIp')" width="140" show-overflow-tooltip />
-          <el-table-column :label="t('assets.os')" min-width="200" show-overflow-tooltip>
+          <el-table-column :label="t('assets.ipCol')" min-width="120" show-overflow-tooltip sortable :sort-method="sortByPrivateIp">
+            <template #default="{ row }">
+              <div class="stack-cell">
+                <div class="stack-primary">{{ row.privateIp || t('common.emDash') }}</div>
+                <div class="stack-secondary">{{ row.publicIp || t('common.emDash') }}</div>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column :label="t('assets.os')" min-width="160" show-overflow-tooltip sortable :sort-method="sortByOs">
             <template #default="{ row }">
               <div class="os-cell">
                 <span class="os-text">{{ row.os || t('common.emDash') }}</span>
@@ -59,7 +71,7 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column :label="t('assets.alerts')" width="72" align="center">
+          <el-table-column :label="t('assets.alerts')" width="92" align="center" sortable :sort-method="sortByAlerts">
             <template #default="{ row }">
               <el-tooltip
                 v-if="alertCount(row) > 0"
@@ -78,7 +90,7 @@
               <span v-else class="alert-none">{{ t('common.emDash') }}</span>
             </template>
           </el-table-column>
-          <el-table-column prop="agentVersion" :label="t('assets.agentVersion')" width="120" show-overflow-tooltip>
+          <el-table-column prop="agentVersion" :label="t('assets.agentVersion')" width="130" show-overflow-tooltip sortable :sort-method="sortByAgentVersion">
             <template #default="{ row }">{{ row.agentVersion || t('common.emDash') }}</template>
           </el-table-column>
           <el-table-column :label="t('common.actions')" width="220" fixed="right" align="right">
@@ -433,13 +445,65 @@ function localeTag() {
   return locale.value === 'zh' ? 'zh-CN' : 'en'
 }
 
+function cmpText(a, b) {
+  return String(a || '').localeCompare(String(b || ''), localeTag(), { sensitivity: 'base' })
+}
+
+function ipv4Key(ip) {
+  const m = String(ip || '').trim().match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
+  if (!m) return null
+  const parts = m.slice(1).map((n) => Number(n))
+  if (parts.some((n) => n > 255)) return null
+  return ((parts[0] << 24) >>> 0) + (parts[1] << 16) + (parts[2] << 8) + parts[3]
+}
+
+function sortByName(a, b) {
+  const an = a.displayName || a.hostname || ''
+  const bn = b.displayName || b.hostname || ''
+  const c = cmpText(an, bn)
+  if (c !== 0) return c
+  return cmpText(a.hostname, b.hostname) || cmpText(a.id, b.id)
+}
+
+function sortByGroup(a, b) {
+  // Ungrouped last.
+  const ag = a.groupId ? (a.groupName || '') : '\uffff'
+  const bg = b.groupId ? (b.groupName || '') : '\uffff'
+  return cmpText(ag, bg) || sortByName(a, b)
+}
+
+function sortByOnline(a, b) {
+  // Ascending: online first.
+  const d = Number(!!b.online) - Number(!!a.online)
+  return d !== 0 ? d : sortByName(a, b)
+}
+
+function sortByPrivateIp(a, b) {
+  const ak = ipv4Key(a.privateIp)
+  const bk = ipv4Key(b.privateIp)
+  if (ak == null && bk == null) return cmpText(a.privateIp, b.privateIp) || sortByName(a, b)
+  if (ak == null) return 1
+  if (bk == null) return -1
+  if (ak !== bk) return ak - bk
+  return sortByName(a, b)
+}
+
+function sortByOs(a, b) {
+  return cmpText(a.os, b.os) || sortByName(a, b)
+}
+
+function sortByAlerts(a, b) {
+  const d = alertCount(a) - alertCount(b)
+  return d !== 0 ? d : sortByName(a, b)
+}
+
+function sortByAgentVersion(a, b) {
+  // Agent versions are yymmddHHMM — lexicographic order matches time order.
+  return cmpText(a.agentVersion, b.agentVersion) || sortByName(a, b)
+}
+
 function sortAssets(list) {
-  return [...list].sort((a, b) => {
-    const an = (a.displayName || a.hostname || '').toLowerCase()
-    const bn = (b.displayName || b.hostname || '').toLowerCase()
-    if (an !== bn) return an.localeCompare(bn, localeTag())
-    return String(a.id || '').localeCompare(String(b.id || ''))
-  })
+  return [...list].sort(sortByName)
 }
 
 async function reloadAll() {
@@ -539,14 +603,37 @@ onBeforeUnmount(() => {
   margin-left: auto;
   font-weight: 500;
 }
-.list-count {
-  color: var(--ops-text-secondary);
-  font-size: 12px;
+.list-pane :deep(.el-table .el-table__header .cell) {
   white-space: nowrap;
 }
 .os-cell { display: flex; align-items: center; min-width: 0; gap: 6px; }
 .os-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .proto { flex-shrink: 0; }
+.stack-cell {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0;
+  min-width: 0;
+  line-height: 1.15;
+  padding: 1px 0;
+}
+.stack-primary {
+  font-size: inherit;
+  font-weight: inherit;
+  color: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stack-secondary {
+  margin-top: 1px;
+  font-size: 10px;
+  color: #b6c0cc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .alert-count-tag { cursor: default; min-width: 22px; justify-content: center; }
 .alert-none { color: var(--ops-text-secondary); }
 .alert-tip { line-height: 1.45; max-width: 280px; }
