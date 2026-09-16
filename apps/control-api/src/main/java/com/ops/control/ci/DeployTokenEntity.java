@@ -41,9 +41,6 @@ public class DeployTokenEntity {
     @Column(name = "expires_at")
     private Instant expiresAt;
 
-    @Column(name = "revoked_at")
-    private Instant revokedAt;
-
     @Column(name = "created_by")
     private UUID createdBy;
 
@@ -73,8 +70,6 @@ public class DeployTokenEntity {
     public void setAllowReverse(boolean allowReverse) { this.allowReverse = allowReverse; }
     public Instant getExpiresAt() { return expiresAt; }
     public void setExpiresAt(Instant expiresAt) { this.expiresAt = expiresAt; }
-    public Instant getRevokedAt() { return revokedAt; }
-    public void setRevokedAt(Instant revokedAt) { this.revokedAt = revokedAt; }
     public UUID getCreatedBy() { return createdBy; }
     public void setCreatedBy(UUID createdBy) { this.createdBy = createdBy; }
     public Instant getCreatedAt() { return createdAt; }

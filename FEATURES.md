@@ -4,7 +4,7 @@
 > 任何功能新增、完成、搁置、行为变更，都必须先读本文件，并在同一变更中更新对应条目的状态与说明。  
 > README 只保留快速启动。历史设计稿 `bastion_architecture_design_*.plan.md` 不必再读。
 
-**最后更新：** 2026-09-16（指标报表去掉 SVG，只返回 points）
+**最后更新：** 2026-09-16（Deploy Token 吊销改为直接删除）
 
 ---
 
@@ -227,7 +227,7 @@
 | `[!]` | 反向权限与 SSRF | 沿用「可见资产即可创建」；反向会让 Gateway 拨其可达网络（Docker 下 `127.0.0.1`=容器自身）；**本期无**目标 denylist / 短租约 ACL（待做见 §9） |
 | `[x]` | woopsctl 临时正向 TCP/UDP | `woopsctl forward --protocol tcp\|udp --listen host:port --target host:port`；监听在 ctl 本机，目标由 Agent 拨；Gateway 不监听业务端口、不写 `port_mappings`；TCP 每 Accept 一条数据 WSS，UDP 每命令一条 DATAGRAM WSS |
 | `[x]` | woopsctl 临时反向 TCP/UDP | `woopsctl reverse --protocol tcp\|udp --listen host:port --target host:port`；Agent 监听，目标由 ctl 本机拨；轻量控制 WSS 维持临时租约，TCP 每连接独立数据 WSS，UDP 每映射一条 DATAGRAM WSS；稳定且强制 `opsctl:` 命名空间的命令级 `ephemeralId` 保证重连幂等并隔离持久 mapping UUID |
-| `[x]` | 临时映射自动恢复 | woopsctl 是期望状态持有者：Gateway 重启、网络闪断、Agent 离线均不退出，1s→2s→4s（最大 30s、带抖动）持续重连；Agent/Gateway 恢复后自动重新换票/登记/监听。旧 TCP 连接可断，后续连接恢复；仅 Ctrl+C、参数错误、Token 过期/吊销/无权限等永久错误退出 |
+| `[x]` | 临时映射自动恢复 | woopsctl 是期望状态持有者：Gateway 重启、网络闪断、Agent 离线均不退出，1s→2s→4s（最大 30s、带抖动）持续重连；Agent/Gateway 恢复后自动重新换票/登记/监听。旧 TCP 连接可断，后续连接恢复；仅 Ctrl+C、参数错误、Token 过期/删除/无权限等永久错误退出 |
 | `[x]` | 持久/临时共用引擎与审计 | Gateway 单一 `services/portmap` 共用 Agent 协议、relay、配对、字节统计与审计；DB 清单和 Deploy Token 仅是不同授权/lifecycle adapter，不启动 woopsctl 子进程。临时流量仍写 `PORTMAP_TCP/UDP` 到操作审计端口连接 tab，detail 含 `ephemeral=true`/`initiator=opsctl`/新 direction 且无 `mappingId`，故不进入持久映射历史抽屉 |
 
 ---
@@ -267,7 +267,7 @@
 | 状态 | 功能 | 说明 |
 |------|------|------|
 | `[x]` | `woopsctl` 二进制 | `go/cmd/woopsctl`（内部实现 `go/internal/opsctl`）：`upload` / `download` / `exec` / `forward` / `reverse`；env **`OPSCTL_CONFIG`** JSON（server/token/pin）；`server` 须 `https://`；pin 校 Gateway TLS；远端 exit code 透传；公开下载 `GET /bin/woopsctl/{os}/{arch}`（Docker 内置 linux amd64/arm64 + windows amd64） |
-| `[x]` | 部署 Token | 表 `deploy_tokens`：绑 **单资产**、可选 `remark`、`allow_upload`/`allow_download`/`allow_exec`/`allow_forward`/`allow_reverse`（五项独立；旧 `allow_portmap` 启动时迁移后删除）、`expires_at` 可空=无限期、吊销；forward/reverse 默认关闭；创建时返回 `opsctlConfig` / `opsctlConfigJson`（只一次）；SHA-256 存库；管理 API `/api/assets/{id}/deploy-tokens`；Console 资产详情右侧 **下载 woopsctl** 弹窗展示固定公开 URL（`/bin/woopsctl/{os}/{arch}`），可复制链接 / wget·curl 命令 / 本机下载（linux amd64·arm64 + windows amd64） |
+| `[x]` | 部署 Token | 表 `deploy_tokens`：绑 **单资产**、可选 `remark`、`allow_upload`/`allow_download`/`allow_exec`/`allow_forward`/`allow_reverse`（五项独立；旧 `allow_portmap` 启动时迁移后删除）、`expires_at` 可空=无限期、**直接删除**（与用户 API Token 一致；创建/删除记控制审计；旧软吊销行启动时清理）；forward/reverse 默认关闭；创建时返回 `opsctlConfig` / `opsctlConfigJson`（只一次）；SHA-256 存库；管理 API `/api/assets/{id}/deploy-tokens`；Console 资产详情右侧 **下载 woopsctl** 弹窗展示固定公开 URL（`/bin/woopsctl/{os}/{arch}`），可复制链接 / wget·curl 命令 / 本机下载（linux amd64·arm64 + windows amd64） |
 | `[x]` | `woopsctl upload` / `download` / `exec` | Gateway 反代换票 → `/ws/file-transfer` 或 `/ws/exec`；上传下载与 Console 同一二进制协议（自动重连续传）；stderr 进度：换票/连接/已传总量/%/速度/已耗时/ETA（TTY 同行刷新）；Agent `sessions/exec` 流式输出；运行态：EXEC `OPERATION` + `RUN` ACTION（command/cwd/timeout，**不落 stdout/stderr**）+ END 带 `exitCode`/`durationMs` |
 | `[x]` | GitLab CI 示例与文档 | `docs/woopsctl-gitlab-ci.md` |
 

@@ -37,7 +37,7 @@
       <el-table-column :label="t('common.status')" width="90" align="center">
         <template #default="{ row }">
           <el-tag size="small" :type="row.active ? 'success' : 'info'">
-            {{ row.active ? t('deployToken.active') : (row.revokedAt ? t('deployToken.revoked') : t('deployToken.expired')) }}
+            {{ row.active ? t('deployToken.active') : t('deployToken.expired') }}
           </el-tag>
         </template>
       </el-table-column>
@@ -53,9 +53,8 @@
             size="small"
             link
             type="danger"
-            :disabled="!!row.revokedAt"
-            @click="revoke(row)"
-          >{{ t('deployToken.revoke') }}</el-button>
+            @click="remove(row)"
+          >{{ t('common.delete') }}</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -323,23 +322,23 @@ async function create() {
   }
 }
 
-async function revoke(row) {
+async function remove(row) {
   const label = row.remark || row.id?.slice?.(0, 8) || t('deployToken.thisToken')
   try {
     await ElMessageBox.confirm(
-      t('deployToken.revokeConfirm', { label }),
-      t('deployToken.revokeTitle'),
-      { confirmButtonText: t('deployToken.revoke'), cancelButtonText: t('common.cancel'), type: 'warning', confirmButtonClass: 'el-button--danger' }
+      t('deployToken.deleteConfirm', { label }),
+      t('common.delete'),
+      { confirmButtonText: t('common.delete'), cancelButtonText: t('common.cancel'), type: 'warning', confirmButtonClass: 'el-button--danger' }
     )
   } catch {
     return
   }
   try {
     await api.delete(`/assets/${props.assetId}/deploy-tokens/${row.id}`)
-    ElMessage.success(t('deployToken.revokedOk'))
+    ElMessage.success(t('common.deleteSuccess'))
     await reload()
   } catch (e) {
-    ElMessage.error(e?.response?.data?.error || e?.message || t('deployToken.revokeFailed'))
+    ElMessage.error(e?.response?.data?.error || e?.message || t('common.deleteFailed'))
   }
 }
 

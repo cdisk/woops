@@ -36,6 +36,11 @@ public class DeployTokenScopeMigrator implements ApplicationRunner {
                   applied_at timestamptz NOT NULL
                 )
                 """);
+        migrateScopes();
+        purgeSoftRevoked();
+    }
+
+    private void migrateScopes() {
         Integer applied = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM ops_schema_patches WHERE id = ?",
                 Integer.class,
@@ -74,5 +79,37 @@ public class DeployTokenScopeMigrator implements ApplicationRunner {
         jdbc.update(
                 "INSERT INTO ops_schema_patches(id, applied_at) VALUES (?, NOW())",
                 PATCH_ID);
+    }
+
+    /** One-shot: hard-delete rows previously soft-revoked via revoked_at. */
+    private void purgeSoftRevoked() {
+        final String purgePatch = "deploy_token_purge_revoked_v1";
+        Integer applied = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM ops_schema_patches WHERE id = ?",
+                Integer.class,
+                purgePatch);
+        if (applied != null && applied > 0) {
+            return;
+        }
+        Boolean hasRevokedAt = jdbc.query(
+                """
+                SELECT EXISTS (
+                  SELECT 1 FROM information_schema.columns
+                  WHERE table_schema = current_schema()
+                    AND table_name = 'deploy_tokens'
+                    AND column_name = 'revoked_at'
+                )
+                """,
+                rs -> rs.next() && rs.getBoolean(1));
+        int n = 0;
+        if (Boolean.TRUE.equals(hasRevokedAt)) {
+            n = jdbc.update("DELETE FROM deploy_tokens WHERE revoked_at IS NOT NULL");
+            if (n > 0) {
+                log.info("Purged {} soft-revoked deploy_tokens", n);
+            }
+        }
+        jdbc.update(
+                "INSERT INTO ops_schema_patches(id, applied_at) VALUES (?, NOW())",
+                purgePatch);
     }
 }

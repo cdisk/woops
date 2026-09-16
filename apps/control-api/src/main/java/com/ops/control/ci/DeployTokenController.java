@@ -62,11 +62,11 @@ public class DeployTokenController {
     }
 
     @DeleteMapping("/{tokenId}")
-    public Map<String, String> revoke(
+    public Map<String, String> delete(
             @PathVariable UUID assetId,
             @PathVariable UUID tokenId,
             Authentication auth) {
         UserEntity user = access.requireUser(auth);
-        return service.revoke(assetId, tokenId, user);
+        return service.delete(assetId, tokenId, user);
     }
 }

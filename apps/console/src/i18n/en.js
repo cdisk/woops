@@ -909,11 +909,9 @@ export default {
     expires: 'Expires',
     never: 'Never',
     active: 'Active',
-    revoked: 'Revoked',
     expired: 'Expired',
     createdAt: 'Created',
     lastUsed: 'Last used',
-    revoke: 'Revoke',
     createTitle: 'Create deploy token',
     remarkPlaceholder: 'Optional, e.g. GitLab production',
     expiresPlaceholder: 'Empty = never',
@@ -925,10 +923,7 @@ export default {
     expiresInvalid: 'Invalid expiry',
     noConfigReturned: 'No OPSCTL_CONFIG returned',
     thisToken: 'this token',
-    revokeConfirm: 'Revoke “{label}”? This cannot be undone.',
-    revokeTitle: 'Revoke token',
-    revokedOk: 'Revoked',
-    revokeFailed: 'Failed to revoke',
+    deleteConfirm: 'Delete “{label}”? It will stop working immediately.',
     copiedConfig: 'OPSCTL_CONFIG copied'
   },
 

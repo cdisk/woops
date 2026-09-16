@@ -885,11 +885,9 @@ export default {
     expires: '有效期',
     never: '无限期',
     active: '有效',
-    revoked: '已吊销',
     expired: '已过期',
     createdAt: '创建时间',
     lastUsed: '最近使用',
-    revoke: '吊销',
     createTitle: '创建部署 Token',
     remarkPlaceholder: '可选，例如：GitLab 生产发布',
     expiresPlaceholder: '不选 = 无限期',
@@ -901,10 +899,7 @@ export default {
     expiresInvalid: '有效期无效',
     noConfigReturned: '未返回 OPSCTL_CONFIG',
     thisToken: '该 Token',
-    revokeConfirm: '确认吊销「{label}」？吊销后不可恢复。',
-    revokeTitle: '吊销 Token',
-    revokedOk: '已吊销',
-    revokeFailed: '吊销失败',
+    deleteConfirm: '确定删除「{label}」？删除后立即失效。',
     copiedConfig: '已复制 OPSCTL_CONFIG'
   },
 

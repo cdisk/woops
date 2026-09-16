@@ -151,31 +151,28 @@ public class DeployTokenService {
     }
 
     @Transactional
-    public Map<String, String> revoke(UUID assetId, UUID tokenId, UserEntity user) {
+    public Map<String, String> delete(UUID assetId, UUID tokenId, UserEntity user) {
         AssetEntity asset = requireAccessibleAsset(assetId, user);
         DeployTokenEntity entity = tokens.findById(tokenId)
                 .orElseThrow(() -> new IllegalArgumentException("token not found"));
         if (!entity.getAssetId().equals(asset.getId())) {
             throw new IllegalArgumentException("token not found");
         }
-        if (entity.getRevokedAt() == null) {
-            entity.setRevokedAt(Instant.now());
-            tokens.save(entity);
-            Map<String, Object> detail = new LinkedHashMap<>();
-            detail.put("tokenId", entity.getId().toString());
-            if (entity.getRemark() != null) {
-                detail.put("remark", entity.getRemark());
-            }
-            audit.record(
-                    ControlAuditService.CAT_CI,
-                    ControlAuditService.ACT_REVOKE,
-                    user.getId(),
-                    user.getUsername(),
-                    asset.getId(),
-                    null,
-                    ControlAuditService.jsonDetail(detail));
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("tokenId", entity.getId().toString());
+        if (entity.getRemark() != null) {
+            detail.put("remark", entity.getRemark());
         }
-        return Map.of("status", "revoked", "id", tokenId.toString());
+        tokens.delete(entity);
+        audit.record(
+                ControlAuditService.CAT_CI,
+                ControlAuditService.ACT_REMOVE,
+                user.getId(),
+                user.getUsername(),
+                asset.getId(),
+                null,
+                ControlAuditService.jsonDetail(detail));
+        return Map.of("status", "deleted", "id", tokenId.toString());
     }
 
     /**
@@ -297,9 +294,6 @@ public class DeployTokenService {
                 entity.getSecretHash().getBytes(StandardCharsets.UTF_8))) {
             throw new IllegalArgumentException("invalid token");
         }
-        if (entity.getRevokedAt() != null) {
-            throw new IllegalArgumentException("token revoked");
-        }
         if (entity.getExpiresAt() != null && !entity.getExpiresAt().isAfter(Instant.now())) {
             throw new IllegalArgumentException("token expired");
         }
@@ -324,11 +318,9 @@ public class DeployTokenService {
         m.put("allowForward", e.isAllowForward());
         m.put("allowReverse", e.isAllowReverse());
         m.put("expiresAt", e.getExpiresAt() == null ? null : e.getExpiresAt().toString());
-        m.put("revokedAt", e.getRevokedAt() == null ? null : e.getRevokedAt().toString());
         m.put("createdAt", e.getCreatedAt().toString());
         m.put("lastUsedAt", e.getLastUsedAt() == null ? null : e.getLastUsedAt().toString());
-        m.put("active", e.getRevokedAt() == null
-                && (e.getExpiresAt() == null || e.getExpiresAt().isAfter(Instant.now())));
+        m.put("active", e.getExpiresAt() == null || e.getExpiresAt().isAfter(Instant.now()));
         return m;
     }
 
