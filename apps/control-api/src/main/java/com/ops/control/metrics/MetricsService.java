@@ -169,67 +169,72 @@ public class MetricsService {
         return out;
     }
 
+    private static final int REPORT_MAX_KEYS = 20;
+    private static final int REPORT_MAX_SPAN_DAYS = 400;
+    private static final int SERIES_MAX_POINTS = 2500;
+
+    public record SeriesSummary(Double min, Double max, Double avg, long sampleCount) {
+        Map<String, Object> toMap() {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("min", min);
+            m.put("max", max);
+            m.put("avg", avg);
+            m.put("sampleCount", sampleCount);
+            return m;
+        }
+    }
+
+    private record BucketPoint(Instant time, double avg, Double min, Double max, long sampleCount) {}
+
+    private record Acc(double min, double max, double weightedSum, long sampleCount) {
+        static Acc of(double min, double max, double avg, long n) {
+            return new Acc(min, max, avg * n, n);
+        }
+
+        Acc merge(Acc o) {
+            if (o == null || o.sampleCount <= 0) return this;
+            if (sampleCount <= 0) return o;
+            return new Acc(
+                    Math.min(min, o.min),
+                    Math.max(max, o.max),
+                    weightedSum + o.weightedSum,
+                    sampleCount + o.sampleCount);
+        }
+
+        SeriesSummary toSummary() {
+            if (sampleCount <= 0) return new SeriesSummary(null, null, null, 0);
+            return new SeriesSummary(min, max, weightedSum / sampleCount, sampleCount);
+        }
+    }
+
     public Map<String, Object> series(UUID assetId, List<String> itemIds, Instant from, Instant to,
                                       String grain, String instance) {
         if (itemIds == null || itemIds.isEmpty()) {
             itemIds = itemDefs.findByChartDefaultTrueOrderByItemIdAsc().stream()
                     .map(MonitorItemDefEntity::getItemId).toList();
         }
-        boolean useTrends = useTrends(from, to);
-        String g = effectiveGrain(grain, from, to, useTrends);
-        String inst = instance == null ? "" : instance;
-        Map<String, List<Map<String, Object>>> series = new LinkedHashMap<>();
+        RangeQuery q = queryRange(assetId, itemIds, from, to, grain, instance, false);
         Map<String, MonitorItemDefEntity> defs = new HashMap<>();
         for (MonitorItemDefEntity d : itemDefs.findAll()) {
             defs.put(d.getItemId(), d);
         }
-        String placeholders = String.join(",", Collections.nCopies(itemIds.size(), "?"));
-        String sql;
-        List<Object> args = new ArrayList<>();
-        if (useTrends) {
-            sql = """
-                    select item_id, date_trunc(?, hour) as bucket, instance, avg(avg_value) as metric_value
-                    from monitor_trends
-                    where asset_id = ? and item_id in (%s)
-                      and hour >= ? and hour < ?
-                      and (? = '' or instance = ?)
-                    group by item_id, bucket, instance
-                    order by item_id asc, bucket asc, instance asc
-                    """.formatted(placeholders);
-        } else {
-            sql = """
-                    select item_id, date_trunc(?, time) as bucket, instance, avg(metric_value) as metric_value
-                    from monitor_history
-                    where asset_id = ? and item_id in (%s)
-                      and time >= ? and time < ?
-                      and (? = '' or instance = ?)
-                    group by item_id, bucket, instance
-                    order by item_id asc, bucket asc, instance asc
-                    """.formatted(placeholders);
-        }
-        args.add(g);
-        args.add(assetId);
-        args.addAll(itemIds);
-        args.add(Timestamp.from(from));
-        args.add(Timestamp.from(to));
-        args.add(inst);
-        args.add(inst);
-        jdbc.query(sql, rs -> {
-            String itemId = rs.getString("item_id");
-            String rowInstance = rs.getString("instance");
-            String key = itemId + (rowInstance == null || rowInstance.isEmpty() ? "" : ("|" + rowInstance));
-            Timestamp bucket = rs.getTimestamp("bucket");
-            series.computeIfAbsent(key, k -> new ArrayList<>()).add(Map.of(
-                    "time", bucket.toInstant().toString(),
-                    "value", rs.getDouble("metric_value")
-            ));
-        }, args.toArray());
-        // Keep response series ordered by the requested chart order rather than SQL lexical order.
         Map<String, List<Map<String, Object>>> orderedSeries = new LinkedHashMap<>();
+        Map<String, Object> summaries = new LinkedHashMap<>();
         for (String itemId : itemIds) {
-            series.forEach((key, points) -> {
+            q.series().forEach((key, points) -> {
                 if (key.equals(itemId) || key.startsWith(itemId + "|")) {
-                    orderedSeries.put(key, points);
+                    List<Map<String, Object>> pts = new ArrayList<>();
+                    for (BucketPoint p : points) {
+                        Map<String, Object> pt = new LinkedHashMap<>();
+                        pt.put("time", p.time().toString());
+                        pt.put("value", p.avg());
+                        if (p.min() != null) pt.put("min", p.min());
+                        if (p.max() != null) pt.put("max", p.max());
+                        pts.add(pt);
+                    }
+                    orderedSeries.put(key, pts);
+                    SeriesSummary sum = q.summaries().getOrDefault(key, new SeriesSummary(null, null, null, 0));
+                    summaries.put(key, sum.toMap());
                 }
             });
         }
@@ -243,13 +248,380 @@ public class MetricsService {
             meta.add(m);
         }
         Map<String, Object> out = new LinkedHashMap<>();
-        out.put("grain", g);
-        out.put("source", useTrends ? "trends" : "history");
+        out.put("grain", q.grain());
+        out.put("source", q.source());
         out.put("from", from.toString());
         out.put("to", to.toString());
         out.put("items", meta);
         out.put("series", orderedSeries);
+        out.put("summaries", summaries);
         return out;
+    }
+
+    /**
+     * Metrics report: shared stats + bucket points per itemId|instance (client draws charts).
+     * Time range is half-open {@code [from,to)}.
+     */
+    public Map<String, Object> reportMetrics(
+            UUID assetId,
+            String displayName,
+            List<String> itemIds,
+            Instant from,
+            Instant to,
+            String grain,
+            String instance) {
+        if (itemIds == null || itemIds.isEmpty()) {
+            throw new IllegalArgumentException("keys required");
+        }
+        if (itemIds.size() > REPORT_MAX_KEYS) {
+            throw new IllegalArgumentException("too many keys (max " + REPORT_MAX_KEYS + ")");
+        }
+        if (from == null || to == null || !to.isAfter(from)) {
+            throw new IllegalArgumentException("invalid from/to");
+        }
+        if (Duration.between(from, to).compareTo(Duration.ofDays(REPORT_MAX_SPAN_DAYS)) > 0) {
+            throw new IllegalArgumentException("time range too large (max " + REPORT_MAX_SPAN_DAYS + " days)");
+        }
+        RangeQuery q = queryRange(assetId, itemIds, from, to, grain, instance, true);
+        Map<String, MonitorItemDefEntity> defs = new LinkedHashMap<>();
+        for (MonitorItemDefEntity d : itemDefs.findAll()) {
+            defs.put(d.getItemId(), d);
+        }
+        List<Map<String, Object>> results = new ArrayList<>();
+        for (String itemId : itemIds) {
+            List<String> keys = q.series().keySet().stream()
+                    .filter(k -> k.equals(itemId) || k.startsWith(itemId + "|"))
+                    .sorted()
+                    .toList();
+            if (keys.isEmpty()) {
+                keys = List.of(itemId);
+            }
+            for (String key : keys) {
+                String instVal = key.contains("|") ? key.substring(key.indexOf('|') + 1) : "";
+                MonitorItemDefEntity def = defs.get(itemId);
+                String name = def != null ? def.getName() : itemId;
+                String unit = def != null ? def.getUnit() : "";
+                SeriesSummary sum = q.summaries().getOrDefault(key, new SeriesSummary(null, null, null, 0));
+                List<BucketPoint> pts = q.series().getOrDefault(key, List.of());
+                List<Map<String, Object>> pointMaps = new ArrayList<>();
+                for (BucketPoint p : pts) {
+                    Map<String, Object> pm = new LinkedHashMap<>();
+                    pm.put("time", p.time().toString());
+                    pm.put("value", p.avg());
+                    pm.put("min", p.min());
+                    pm.put("max", p.max());
+                    pointMaps.add(pm);
+                }
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("itemId", itemId);
+                row.put("instance", instVal);
+                row.put("name", name);
+                row.put("unit", unit);
+                row.put("status", sum.sampleCount() > 0 ? "ok" : "no_data");
+                row.put("min", sum.min());
+                row.put("avg", sum.avg());
+                row.put("max", sum.max());
+                row.put("sampleCount", sum.sampleCount());
+                row.put("points", pointMaps);
+                results.add(row);
+            }
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("assetId", assetId.toString());
+        out.put("displayName", displayName);
+        out.put("from", from.toString());
+        out.put("to", to.toString());
+        out.put("grain", q.grain());
+        out.put("source", q.source());
+        out.put("results", results);
+        return out;
+    }
+
+    private record RangeQuery(
+            String grain,
+            String source,
+            Map<String, List<BucketPoint>> series,
+            Map<String, SeriesSummary> summaries) {}
+
+    /**
+     * Shared interval query for series API and report API.
+     * Summary is always over {@code [from,to)} from valid samples only (offline gaps excluded).
+     */
+    private RangeQuery queryRange(
+            UUID assetId,
+            List<String> itemIds,
+            Instant from,
+            Instant to,
+            String grain,
+            String instance,
+            boolean forReport) {
+        if (from == null || to == null || !to.isAfter(from)) {
+            throw new IllegalArgumentException("invalid from/to");
+        }
+        if (itemIds == null || itemIds.isEmpty()) {
+            throw new IllegalArgumentException("keys required");
+        }
+        Instant now = Instant.now();
+        Instant historyStart = now.minus(monitor.detailRetentionDays(), ChronoUnit.DAYS);
+        Instant currentHour = now.truncatedTo(ChronoUnit.HOURS);
+        boolean mix = useTrends(from, to, now, monitor.detailRetentionDays());
+        String g = effectiveGrain(grain, from, to, mix);
+        String inst = instance == null ? "" : instance.trim();
+
+        Map<String, List<BucketPoint>> series = new LinkedHashMap<>();
+        Map<String, Acc> summaryAcc = new LinkedHashMap<>();
+
+        if (!mix) {
+            mergeBuckets(series, loadHistoryBuckets(assetId, itemIds, from, to, g, inst));
+            mergeAcc(summaryAcc, loadHistorySummary(assetId, itemIds, from, to, inst));
+        } else {
+            Instant trendsEnd = to.isAfter(currentHour) ? currentHour : to;
+            if (from.isBefore(trendsEnd)) {
+                mergeBuckets(series, loadTrendsBuckets(assetId, itemIds, from, trendsEnd, g, inst));
+                mergeAcc(summaryAcc, loadTrendsSummary(assetId, itemIds, from, trendsEnd, inst));
+            }
+            Instant histFrom = historyStart.isAfter(from) ? historyStart : from;
+            if (to.isAfter(currentHour) && histFrom.isBefore(to)) {
+                Instant sliceFrom = histFrom.isBefore(currentHour) ? currentHour : histFrom;
+                if (sliceFrom.isBefore(to)) {
+                    mergeBuckets(series, loadHistoryBuckets(assetId, itemIds, sliceFrom, to, g, inst));
+                    mergeAcc(summaryAcc, loadHistorySummary(assetId, itemIds, sliceFrom, to, inst));
+                }
+            }
+        }
+
+        int total = series.values().stream().mapToInt(List::size).sum();
+        if (total > SERIES_MAX_POINTS) {
+            String coarser = coarsenGrain(g);
+            if (!coarser.equals(g)) {
+                return queryRange(assetId, itemIds, from, to, coarser, instance, forReport);
+            }
+            int perSeries = Math.max(2, SERIES_MAX_POINTS / Math.max(1, series.size()));
+            for (var e : series.entrySet()) {
+                e.setValue(downsample(e.getValue(), perSeries));
+            }
+        }
+
+        Map<String, SeriesSummary> summaries = new LinkedHashMap<>();
+        for (var e : summaryAcc.entrySet()) {
+            summaries.put(e.getKey(), e.getValue().toSummary());
+        }
+        for (String key : series.keySet()) {
+            summaries.putIfAbsent(key, new SeriesSummary(null, null, null, 0));
+        }
+        return new RangeQuery(g, mix ? "trends+history" : "history", series, summaries);
+    }
+
+    private static String coarsenGrain(String g) {
+        return switch (g) {
+            case "minute" -> "hour";
+            case "hour" -> "day";
+            case "day" -> "month";
+            default -> g;
+        };
+    }
+
+    private static List<BucketPoint> downsample(List<BucketPoint> pts, int max) {
+        if (pts.size() <= max || max < 2) return pts;
+        List<BucketPoint> out = new ArrayList<>(max);
+        double step = (pts.size() - 1) / (double) (max - 1);
+        for (int i = 0; i < max; i++) {
+            out.add(pts.get((int) Math.round(i * step)));
+        }
+        return out;
+    }
+
+    private List<BucketPointRow> loadHistoryBuckets(
+            UUID assetId, List<String> itemIds, Instant from, Instant to, String grain, String inst) {
+        String placeholders = String.join(",", Collections.nCopies(itemIds.size(), "?"));
+        String sql = """
+                select item_id,
+                       date_trunc(?, time) as bucket,
+                       instance,
+                       min(metric_value) as min_value,
+                       max(metric_value) as max_value,
+                       avg(metric_value) as avg_value,
+                       count(*)::bigint as sample_count
+                from monitor_history
+                where asset_id = ? and item_id in (%s)
+                  and time >= ? and time < ?
+                  and (? = '' or instance = ?)
+                group by item_id, bucket, instance
+                order by bucket asc
+                """.formatted(placeholders);
+        List<Object> a = new ArrayList<>();
+        a.add(grain);
+        a.add(assetId);
+        a.addAll(itemIds);
+        a.add(Timestamp.from(from));
+        a.add(Timestamp.from(to));
+        a.add(inst);
+        a.add(inst);
+        return jdbc.query(sql, (rs, rowNum) -> new BucketPointRow(
+                rs.getString("item_id"),
+                nullToEmpty(rs.getString("instance")),
+                rs.getTimestamp("bucket").toInstant(),
+                rs.getDouble("avg_value"),
+                rs.getDouble("min_value"),
+                rs.getDouble("max_value"),
+                rs.getLong("sample_count")
+        ), a.toArray());
+    }
+
+    private List<BucketPointRow> loadTrendsBuckets(
+            UUID assetId, List<String> itemIds, Instant from, Instant to, String grain, String inst) {
+        String placeholders = String.join(",", Collections.nCopies(itemIds.size(), "?"));
+        String sql = """
+                select item_id,
+                       date_trunc(?, hour) as bucket,
+                       instance,
+                       min(min_value) as min_value,
+                       max(max_value) as max_value,
+                       sum(avg_value * sample_count) / nullif(sum(sample_count), 0) as avg_value,
+                       sum(sample_count)::bigint as sample_count
+                from monitor_trends
+                where asset_id = ? and item_id in (%s)
+                  and hour >= ? and hour < ?
+                  and (? = '' or instance = ?)
+                group by item_id, bucket, instance
+                order by bucket asc
+                """.formatted(placeholders);
+        List<Object> a = new ArrayList<>();
+        a.add(grain);
+        a.add(assetId);
+        a.addAll(itemIds);
+        a.add(Timestamp.from(from));
+        a.add(Timestamp.from(to));
+        a.add(inst);
+        a.add(inst);
+        return jdbc.query(sql, (rs, rowNum) -> new BucketPointRow(
+                rs.getString("item_id"),
+                nullToEmpty(rs.getString("instance")),
+                rs.getTimestamp("bucket").toInstant(),
+                rs.getDouble("avg_value"),
+                rs.getDouble("min_value"),
+                rs.getDouble("max_value"),
+                rs.getLong("sample_count")
+        ), a.toArray());
+    }
+
+    private List<SummaryRow> loadHistorySummary(
+            UUID assetId, List<String> itemIds, Instant from, Instant to, String inst) {
+        String placeholders = String.join(",", Collections.nCopies(itemIds.size(), "?"));
+        String sql = """
+                select item_id, instance,
+                       min(metric_value) as min_value,
+                       max(metric_value) as max_value,
+                       avg(metric_value) as avg_value,
+                       count(*)::bigint as sample_count
+                from monitor_history
+                where asset_id = ? and item_id in (%s)
+                  and time >= ? and time < ?
+                  and (? = '' or instance = ?)
+                group by item_id, instance
+                """.formatted(placeholders);
+        List<Object> a = new ArrayList<>();
+        a.add(assetId);
+        a.addAll(itemIds);
+        a.add(Timestamp.from(from));
+        a.add(Timestamp.from(to));
+        a.add(inst);
+        a.add(inst);
+        return jdbc.query(sql, (rs, rowNum) -> new SummaryRow(
+                rs.getString("item_id"),
+                nullToEmpty(rs.getString("instance")),
+                rs.getDouble("min_value"),
+                rs.getDouble("max_value"),
+                rs.getDouble("avg_value"),
+                rs.getLong("sample_count")
+        ), a.toArray());
+    }
+
+    private List<SummaryRow> loadTrendsSummary(
+            UUID assetId, List<String> itemIds, Instant from, Instant to, String inst) {
+        String placeholders = String.join(",", Collections.nCopies(itemIds.size(), "?"));
+        String sql = """
+                select item_id, instance,
+                       min(min_value) as min_value,
+                       max(max_value) as max_value,
+                       sum(avg_value * sample_count) / nullif(sum(sample_count), 0) as avg_value,
+                       sum(sample_count)::bigint as sample_count
+                from monitor_trends
+                where asset_id = ? and item_id in (%s)
+                  and hour >= ? and hour < ?
+                  and (? = '' or instance = ?)
+                group by item_id, instance
+                """.formatted(placeholders);
+        List<Object> a = new ArrayList<>();
+        a.add(assetId);
+        a.addAll(itemIds);
+        a.add(Timestamp.from(from));
+        a.add(Timestamp.from(to));
+        a.add(inst);
+        a.add(inst);
+        return jdbc.query(sql, (rs, rowNum) -> new SummaryRow(
+                rs.getString("item_id"),
+                nullToEmpty(rs.getString("instance")),
+                rs.getDouble("min_value"),
+                rs.getDouble("max_value"),
+                rs.getDouble("avg_value"),
+                rs.getLong("sample_count")
+        ), a.toArray());
+    }
+
+    private record BucketPointRow(
+            String itemId, String instance, Instant time, double avg, double min, double max, long sampleCount) {
+        String key() {
+            return instance.isBlank() ? itemId : itemId + "|" + instance;
+        }
+
+        BucketPoint point() {
+            return new BucketPoint(time, avg, min, max, sampleCount);
+        }
+    }
+
+    private record SummaryRow(
+            String itemId, String instance, double min, double max, double avg, long sampleCount) {
+        String key() {
+            return instance.isBlank() ? itemId : itemId + "|" + instance;
+        }
+
+        Acc acc() {
+            return Acc.of(min, max, avg, sampleCount);
+        }
+    }
+
+    private static void mergeBuckets(Map<String, List<BucketPoint>> series, List<BucketPointRow> rows) {
+        for (BucketPointRow row : rows) {
+            List<BucketPoint> list = series.computeIfAbsent(row.key(), k -> new ArrayList<>());
+            if (!list.isEmpty()) {
+                BucketPoint last = list.get(list.size() - 1);
+                if (last.time().equals(row.time())) {
+                    double lastMin = last.min() != null ? last.min() : last.avg();
+                    double lastMax = last.max() != null ? last.max() : last.avg();
+                    Acc a = Acc.of(lastMin, lastMax, last.avg(), last.sampleCount())
+                            .merge(Acc.of(row.min(), row.max(), row.avg(), row.sampleCount()));
+                    SeriesSummary s = a.toSummary();
+                    list.set(list.size() - 1, new BucketPoint(
+                            row.time(), s.avg(), s.min(), s.max(), s.sampleCount()));
+                    continue;
+                }
+            }
+            list.add(row.point());
+        }
+        for (List<BucketPoint> list : series.values()) {
+            list.sort(Comparator.comparing(BucketPoint::time));
+        }
+    }
+
+    private static void mergeAcc(Map<String, Acc> acc, List<SummaryRow> rows) {
+        for (SummaryRow row : rows) {
+            acc.merge(row.key(), row.acc(), Acc::merge);
+        }
+    }
+
+    private static String nullToEmpty(String s) {
+        return s == null ? "" : s;
     }
 
     boolean useTrends(Instant from, Instant to) {

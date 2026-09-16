@@ -1,8 +1,10 @@
 package com.ops.control.metrics;
 
 import com.ops.control.access.AccessService;
+import com.ops.control.apitoken.ApiTokenAuth;
 import com.ops.control.asset.AssetEntity;
 import com.ops.control.asset.AssetRepository;
+import com.ops.control.controlaudit.ControlAuditService;
 import com.ops.control.user.UserEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -18,11 +20,17 @@ public class MetricsController {
     private final MetricsService metrics;
     private final AccessService access;
     private final AssetRepository assets;
+    private final ControlAuditService audit;
 
-    public MetricsController(MetricsService metrics, AccessService access, AssetRepository assets) {
+    public MetricsController(
+            MetricsService metrics,
+            AccessService access,
+            AssetRepository assets,
+            ControlAuditService audit) {
         this.metrics = metrics;
         this.access = access;
         this.assets = assets;
+        this.audit = audit;
     }
 
     @GetMapping("/dashboard/summary")
@@ -123,6 +131,63 @@ public class MetricsController {
             itemIds = Arrays.stream(keys.split(",")).map(String::trim).filter(s -> !s.isEmpty()).toList();
         }
         return metrics.series(id, itemIds, fromTs, toTs, grain, instance);
+    }
+
+    public record ReportMetricsBody(
+            UUID assetId,
+            List<String> keys,
+            String from,
+            String to,
+            String grain,
+            String instance) {}
+
+    @PostMapping("/reports/metrics")
+    public Map<String, Object> reportMetrics(@RequestBody ReportMetricsBody body, Authentication auth) {
+        UserEntity user = access.requireUser(auth);
+        if (body == null || body.assetId() == null) {
+            throw new IllegalArgumentException("assetId required");
+        }
+        AssetEntity asset = assets.findById(body.assetId())
+                .orElseThrow(() -> new IllegalArgumentException("asset not found"));
+        access.assertCanAccessAsset(user, asset);
+        Instant toTs = parseOr(body.to(), Instant.now());
+        Instant fromTs = parseOr(body.from(), toTs.minus(7, ChronoUnit.DAYS));
+        List<String> itemIds = body.keys() == null ? List.of() : body.keys().stream()
+                .filter(Objects::nonNull)
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .toList();
+        String grain = body.grain() == null || body.grain().isBlank() ? "hour" : body.grain();
+        String instance = body.instance() == null ? "" : body.instance();
+        Map<String, Object> out = metrics.reportMetrics(
+                asset.getId(),
+                asset.getDisplayName(),
+                itemIds,
+                fromTs,
+                toTs,
+                grain,
+                instance);
+
+        Map<String, Object> detail = new LinkedHashMap<>();
+        if (auth.getDetails() instanceof ApiTokenAuth tokenAuth) {
+            detail.put("tokenId", tokenAuth.tokenId().toString());
+            detail.put("tokenName", tokenAuth.name());
+            detail.put("scopes", tokenAuth.scopes());
+        }
+        detail.put("assetId", asset.getId().toString());
+        detail.put("from", fromTs.toString());
+        detail.put("to", toTs.toString());
+        detail.put("keys", itemIds);
+        detail.put("grain", out.get("grain"));
+        audit.record(
+                ControlAuditService.CAT_MONITOR,
+                ControlAuditService.ACT_REPORT_READ,
+                user.getId(),
+                user.getUsername(),
+                asset.getId(),
+                null,
+                ControlAuditService.jsonDetail(detail));
+        return out;
     }
 
     @GetMapping("/monitor/alert-rules")

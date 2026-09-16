@@ -324,7 +324,7 @@ apps/console         Vue3 + Element Plus（en/zh）
 go/cmd/{gateway,agent,woopsctl}
 go/internal/opsctl   woopsctl 内部实现
 deploy/              源码构建 compose、Dockerfile、env.prod.example、gen-gateway-tls.sh
-docs/                Agent 手动安装、woopsctl CI 说明、screenshots/ 界面截图
+docs/                Agent 手动安装、woopsctl CI、用户 API Token / 指标报表、screenshots/ 界面截图
 ```
 
 ## 反馈

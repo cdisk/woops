@@ -4,7 +4,7 @@
 > 任何功能新增、完成、搁置、行为变更，都必须先读本文件，并在同一变更中更新对应条目的状态与说明。  
 > README 只保留快速启动。历史设计稿 `bastion_architecture_design_*.plan.md` 不必再读。
 
-**最后更新：** 2026-09-15（资产列表紧凑双行列 + 前端排序；Hub 0.1.2）
+**最后更新：** 2026-09-16（指标报表去掉 SVG，只返回 points）
 
 ---
 
@@ -37,6 +37,7 @@
 | 本地端口 | **9100** = control-api（REST）；Gateway **9200 PUBLIC**（https/wss）+ **9201 INTERNAL**（http）；Compose 下 Gateway **host 网络**直绑；Console Docker **443**。生产可用 Nginx 终止 TLS 后反代。**公网只放 443 + 9200**（正向 portmap 另放 20000–21000）；9100/9201/5432/4822 靠服务器防火墙/安全组，**不**在 compose 里绑 `127.0.0.1`（Gateway host 网需要宿主机环回映射；**9201 绑环回会断** console→`host.docker.internal`）。Console nginx 已 404 `/api/internal`、`/api/sessions/internal`、`/api/opsctl` |
 | URL 变量 | 模板 [`.env.example`](.env.example)（中文注释）；本机复制为 `.env`（**gitignore，勿提交**），`scripts/load-env.ps1` 先加载 `.env`，再叠加 `.env.local`。**PUBLIC** / **INTERNAL** 见该文件。Compose full：Gateway host 网 → `OPS_CONTROL_INTERNAL_HTTP=http://127.0.0.1:9100`、bridge 服务经 `host.docker.internal:9201` 调 Gateway |
 | woopsctl / 部署 Token | 对外二进制名 **`woopsctl`**，内部包/API/配置契约保留 `opsctl` 命名；**资产级**一机多 Token（`ops_<tokenId>_<secret>`）；可选 `expiresAt`（空=无限期）+ 可选备注；scope 五项独立：`upload` / `download` / `exec` / `forward` / `reverse`（后两者对应临时端口映射，默认不授权）；可见资产即可管理；仅 `OPSCTL_CONFIG` JSON（`server`+`token`+`pin`，创建时展示一次）；`server` 为 Gateway **https** 基址；通道：Gateway 反代换票 + filetransfer/exec/临时 portmap WS；旧 `OPSCTL_SERVER`/`OPSCTL_TOKEN` 已移除 |
+| 用户 API Token | 与 Deploy Token 隔离；个人中心 `/profile` 管理；明文 `wpat_<id>_<secret>` 仅创建展示一次、库存 SHA-256；scope 白名单可扩展：`assets:read`（资产/分组只读列表与详情）、`metrics:read`（监控与指标统计报表）；可选 `expiresAt`（**空=永久**）；仅新建+删除；路径→scope 白名单 + 实时用户资产范围；个人中心「API 说明」用 `{{API_REQUEST_PREFIX}}` 模板注入环境变量/浏览器来源地址，Markdown 预览与复制全文均带实际前缀；见 [`docs/metrics-report-api.md`](docs/metrics-report-api.md) |
 
 ---
 
@@ -50,7 +51,7 @@
 | `[x]` | guacd sidecar | `deploy/docker-compose.yml` → `guacamole/guacd:1.5.5`（发布宿主 `:4822`）；Gateway `OPS_GUACD_ADDR=127.0.0.1:4822`、`OPS_GUAC_BRIDGE_HOST=host.docker.internal`；console/control-api/guacd 配 `extra_hosts: host.docker.internal:host-gateway` |
 | `[x]` | `data/ops-audit/` 卷 | 运行态 JSONL **与会话录像**的本地根目录；`OPS_AUDIT_DIR`（默认 `./data/ops-audit`；Compose `/data/ops-audit` 同时挂 control-api / gateway / guacd）；已 gitignore |
 | `[ ]` | `openapi/` 契约 | Java REST → Vue TS client |
-| `[~]` | 运维文档 | CI 已有 [`docs/woopsctl-gitlab-ci.md`](docs/woopsctl-gitlab-ci.md)；Linux Agent **离线/Bridge 手工安装** [`docs/agent-manual-install.md`](docs/agent-manual-install.md)；README **§A 镜像快速启动** + 本机编译路径；控制台安装弹窗可**单独复制安装码**；仍缺 GitLab OAuth 专文 |
+| `[~]` | 运维文档 | CI 已有 [`docs/woopsctl-gitlab-ci.md`](docs/woopsctl-gitlab-ci.md)；用户 API Token / 指标报表 [`docs/metrics-report-api.md`](docs/metrics-report-api.md)；Linux Agent **离线/Bridge 手工安装** [`docs/agent-manual-install.md`](docs/agent-manual-install.md)；README **§A 镜像快速启动** + 本机编译路径；控制台安装弹窗可**单独复制安装码**；仍缺 GitLab OAuth 专文 |
 | `[x]` | 健康检查 | control-api `/api/health`、gateway `/health` |
 | `[x]` | 公网/LAN URL 解析 | `PublicUrlResolver`：配置了非 loopback 的 `OPS_GATEWAY_PUBLIC_*` / `OPS_CONTROL_PUBLIC_HTTP` 时用配置；仅 loopback 时按浏览器 Origin 改写 LAN IP；`GatewayClient` 走 `OPS_GATEWAY_INTERNAL_HTTP` |
 | `[x]` | 代码组织约定 | Java 按业务模块（`PageSupport`、`AccessService`、`SessionTicketService` → `ProtocolRegistry` + `protocol.*TicketIssuer`）。Go 最终分类：Agent `agent/{app,core,sessions,services,plugins,infra,sessionreg}`；Gateway `gateway/{app,core,sessions,services,plugins,infra}`。`app` 是唯一具体组合根并可依赖全部功能；`core` 只依赖注入契约，不得反向依赖 `sessions/services/plugins`；功能实现不得跨 `sessions/services/plugins` 横向依赖另一功能。共享契约位于 `internal/{protocol,sessioncore,sessionws,tlsutil,wsutil,hostinfo}`；UDP 帧为 `protocol/datagram`，网卡筛选为 `hostinfo/netiface`；Guacamole 实现由 `gateway/sessions/desktop/guac` 私有拥有。Gateway 验票边界只返回 `BaseClaims`+原始 JSON，`sessioncore.BridgeSpec` 提供通用桥接编排；`cmd/{agent,gateway}` 只进入各自 `app`。Vue `features/registry.js` 是路由/资产动作唯一聚合点；忌过度抽象 |
@@ -76,7 +77,8 @@
 | `[x]` | User / Role + 数据权限 | 三角色 `SUPER_ADMIN`/`ADMIN`/`MEMBER`；表 `user_scopes`（`GROUP`/`ASSET`）；勾组=子树可管（受角色约束），勾资产=仅用不可删；展示祖先组动态计算；自写 `AccessService`；列表与按 id 读写/票据均强制校验防 IDOR；`JwtAuthFilter` + `SessionController` 发票走 `requireUser`（禁用后不能再开壳） |
 | `[~]` | 短时网关票据策略 | Java 已发 shell/filemanager/filetransfer/rdp/vnc/**exec** 票据（约 90s；`exec` 供控制台一键更新与 woopsctl）；按协议 `ProtocolTicketIssuer` 分发（`ProtocolRegistry`）；portmap 另 `PortmapTicketIssuer`（120s 原始 JWT）；目标 30–60s 后续统一；发票前校验资产可见性 |
 | `[x]` | 多用户管理 UI | `/users`：顶栏本地搜索（用户名/昵称/角色/来源）；建用户（用户名/昵称/密码）、启用/禁用、软删、超管改角色、设可见范围（混合树：组+资产）；管理员仅管 MEMBER；顶栏优先显示昵称；软删释放用户名，GitLab 再登会新建且启用；禁用后 GitLab 再登仍拒绝；本地用户列 **2FA** 状态，管理员可重置 TOTP |
-| `[x]` | 审计拆表 | **控制面** `control_audit_events`；**对服** `server_operation_records`（Gateway JSONL → Java 偏移 ingest；Shell/文件/EXEC/桌面录像/portmap）；**资产事件** `asset_events`（系统观测：上下线等，非人为）；`GET /api/server-operations`(+recording)、`GET /api/control-audit`、`GET /api/asset-events` 均支持 `page`/`pageSize` → `{items,total,…}`。`status` 含 `PURGED`。旧表 `audit_events`/`port_mapping_connections` 已退役。**全员强制录制**。控制审计类别含 `MONITOR`（首页预警忽略/取消忽略） |
+| `[x]` | 个人中心 | `/profile`（顶栏用户名进入）：**API Token**（含 `assets:read` / `metrics:read`）；**API 说明**（Markdown 预览 + 复制全文）；本地账密用户另有 **账号安全**（改密码、重置 TOTP，需验证当前密码；已绑定时重置还需当前验证码；丢失验证器仍走管理员重置） |
+| `[x]` | 审计拆表 | **控制面** `control_audit_events`；**对服** `server_operation_records`（Gateway JSONL → Java 偏移 ingest；Shell/文件/EXEC/桌面录像/portmap）；**资产事件** `asset_events`（系统观测：上下线等，非人为）；`GET /api/server-operations`(+recording)、`GET /api/control-audit`、`GET /api/asset-events` 均支持 `page`/`pageSize` → `{items,total,…}`。`status` 含 `PURGED`。旧表 `audit_events`/`port_mapping_connections` 已退役。**全员强制录制**。控制审计类别含 `MONITOR`（首页预警忽略/取消忽略、指标报表 `REPORT_READ`）与用户 API Token 的 `USER`/`CREATE`/`REMOVE` |
 | `[x]` | 审计日志页（控制审计） | 控制台 `/audit/control` → `GET /api/control-audit?page&pageSize`（`{items,total,page,pageSize}`，默认 50/页）；有资产按可见范围，分组按可见分组，登录/用户类管理员可见（成员仅自己的登录）；列表分组独立列；资产筛选用 **AssetTreeSelect**（可搜索），`?assetId=` 深链；类别含监控忽略 |
 | `[x]` | 操作审计页 | 侧栏「审计」下拆「控制审计」/「操作审计」/「资产事件」；操作审计内 **tab**：会话操作（排除 `PORTMAP_*`）/ 端口连接（仅隧道连通）；端口映射**清单配置**仍在控制审计 `PORTMAP`；`features/audit/{control,operations,assetevents,shared}`；`GET /api/server-operations?scope=session|portmap&page&pageSize`；列表分组独立列；资产筛选 **AssetTreeSelect**；终端 `asciinema-player`；桌面 `Guacamole.SessionRecording` 页内回放；资产详情可跳操作审计/控制审计/资产事件 |
 | `[x]` | 资产事件页 | `/audit/asset-events` → `GET /api/asset-events?page&pageSize`（返回 `{items,total,page,pageSize}`，默认 50/页）；记 **上线/离线**（detail：`sourceIp`/`privateIp`/`agentVersion`/`reason`/`gatewayInstance`/`connectionId`）与 **内网 IP 变化**（`from`/`to`）；列表：分组独立列、详情列展示公网/内网/版本/原因，悬停 tip 含 Gateway/连接 ID；按资产可见范围分页；资产筛选 **AssetTreeSelect**；`?assetId=` |
@@ -119,7 +121,8 @@
 | `[x]` | `protocol_version` / Envelope | `internal/protocol/control`；未知类型忽略；`open_session` **仅**嵌套 `params`（`ShellParams`/`FileTransferParams`/`TunnelParams`）；`netinfo` 仅 `privateIp` CSV；**已移除**平铺字段双写/回退与 `privateIps` 数组双发。golden：`internal/protocol/control/testdata/open_session/` |
 | `[x]` | 监控插件 · 独立 metrics WSS | `/ws/agent/metrics`；`agent/plugins/monitor` + `gateway/plugins/monitor`；默认 60s；`metrics.enabled` 可关；断线不标离线；网卡与 `core/netinfo` 共用 `hostinfo/netiface` 真实网卡过滤；磁盘容量排除光驱（`iso9660`/`udf`/`cdfs`；Windows 另 `GetDriveType`=`DRIVE_CDROM`）；Gateway 对 Agent Ping 用 `PingHandler` 续期 120s 读超时（曾约 120s 周期 1006） |
 | `[x]` | 监控 Timescale history + trends | **`monitor_history`**（分钟明细 hypertable，近 **7** 天可配）+ **`monitor_trends`**（小时 `min/max/avg/sample_count`，保留 **3** 年可配）；字典 `monitor_item_def`；每小时汇集上一小时并删除超期明细；压缩策略由启动引导自动加；旧表名 `monitor_data` 已迁完 |
-| `[x]` | 监控曲线 / 聚合 | `GET …/metrics/series`；grain=minute\|hour\|day\|month；选表：起点在明细保留窗内且跨度≤保留窗 → history，否则 trends；**UI 默认按点数**：≤3 日按分、≤90 日按小时、更长（含 1 年）按日、>3 年按月；**手动选择优先**；后端仅在 trends 无法提供「按分」时改写为小时；多指标合并单次 SQL |
+| `[x]` | 监控曲线 / 聚合 | `GET …/metrics/series`；grain=minute\|hour\|day\|month；选表：起点在明细保留窗内且跨度≤保留窗 → history，否则 trends（跨边界混合未汇总 history）；trends **按 `sample_count` 加权平均**；响应含服务端 `summaries`（min/avg/max/sampleCount，不随显示粒度变；断线缺口不进均值分母）；磁盘/网卡按 instance 拆分。控制台曲线页直接展示该 summary |
+| `[x]` | 指标统计报表 API | `POST /api/reports/metrics`：单资产、多 `itemId`、`[from,to)`、`hour\|day` 等粒度；一次返回区间统计 + 趋势 `points`（`time`/`value`/`min`/`max`，由调用方绘图）；JWT 或 `metrics:read` API Token；控制审计 `MONITOR`/`REPORT_READ`（不记 points/secret）。调用示例 [`docs/metrics-report-api.md`](docs/metrics-report-api.md) |
 | `[x]` | 监控预警 | 全局阈值（优先 %）；入库评估；`asset_alert_status`；配置 CRUD；**仅超管**可见菜单与 API。首页异常含离线；忽略按 **资产+监控项**（`asset_alert_ignores`，离线项 `host.online`） |
 | `[x]` | 首页概览 | 资产总数 / 在线 / 异常（**含离线**，与监控预警并列）；登录进首页。异常按监控项可 **忽略 / 取消忽略**（如只忽略离线或 CPU，不影响该资产其他项；忽略后不占异常列表；「异常资产」标题右侧打开已忽略弹窗 `IgnoredAlertsDialog`；可见资产即可操作；控制审计 `MONITOR`/`IGNORE`/`UNIGNORE`）。异常列表与已忽略清单均展示 **分组**（`groupId`/`groupName`，未分组显示「未分组」；已忽略弹窗加宽）；**名称+主机名**合成一列两行（名称可点 → `/assets?q=`；主机名小灰字）；**分组**可点 → `/assets?groupId=`（左侧树选中该组；未分组不可点） |
 | `[x]` | 资产监控页 | 操作「监控」→ 新浏览器标签 `/assets/:id/monitor`（无侧栏，同会话页）；复用 `AssetMonitorPanel`；顶部规格；各图下最高/平均/最低；时间范围快捷：5 分钟 / 30 分钟 / 1 小时 / 6 小时 / 1 天 / 7 天 / 30 天 / 90 天 / 1 年；图表横向框选时间后按该范围重载全部曲线并自适应 grain；标题左侧关闭（有 opener 则关标签）；首屏 items/latest/series 并行加载，ECharts 按需打包 |
@@ -381,4 +384,5 @@ Browser ──WSS──► Gateway ──WSS──► Agent
 | Agent | `go/internal/agent/{app,core,sessions,services,plugins,infra,sessionreg}/`；`app` 唯一组合，`core` 为 Runtime/Config/control WSS/session/netinfo/TLS，`sessions/{shell,filemanager,filetransfer,exec,socket}`、`services/portmap`、`plugins/{monitor,proxy}` 拥有功能，`infra/applog` 为基础设施；`cmd/agent` 只依赖 `app`+`infra/applog` |
 | woopsctl | `go/cmd/woopsctl`、`go/internal/opsctl/`（内部命名保留，含 `xferclient.go`/端口映射客户端）；文档 `docs/woopsctl-gitlab-ci.md` |
 | 监控控制面 | `apps/control-api/.../metrics/` |
+| 用户 API Token | `apps/control-api/.../apitoken/`；Console `features/profile/` |
 | 部署 | 根目录 `docker-compose.yml`（Hub 镜像）；`deploy/docker-compose.yml`（源码构建，含 guacd profile）；Gateway 自签名 TLS：`deploy/gen-gateway-tls.sh` |

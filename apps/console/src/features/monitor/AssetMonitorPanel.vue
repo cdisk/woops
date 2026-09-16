@@ -348,8 +348,37 @@ function formatChartStat(v, unit) {
 
 const chartStats = computed(() => {
   const seriesMap = seriesPayload.value.series || {}
+  const summaries = seriesPayload.value.summaries || {}
   const out = {}
   for (const ch of chartDefs.value) {
+    // Prefer server summaries (stable across grain); aggregate multi-instance by sampleCount.
+    let min = null
+    let max = null
+    let weighted = 0
+    let n = 0
+    for (const [k, sum] of Object.entries(summaries)) {
+      if (k !== ch.itemId && !k.startsWith(ch.itemId + '|')) continue
+      const sc = Number(sum?.sampleCount) || 0
+      if (sc <= 0 || sum?.avg == null) continue
+      const sMin = Number(sum.min)
+      const sMax = Number(sum.max)
+      const sAvg = Number(sum.avg)
+      if (!Number.isNaN(sMin)) min = min == null ? sMin : Math.min(min, sMin)
+      if (!Number.isNaN(sMax)) max = max == null ? sMax : Math.max(max, sMax)
+      if (!Number.isNaN(sAvg)) {
+        weighted += sAvg * sc
+        n += sc
+      }
+    }
+    if (n > 0) {
+      out[ch.itemId] = {
+        max: formatChartStat(max, ch.unit),
+        avg: formatChartStat(weighted / n, ch.unit),
+        min: formatChartStat(min, ch.unit)
+      }
+      continue
+    }
+    // Fallback for older API without summaries.
     const vals = []
     for (const [k, pts] of Object.entries(seriesMap)) {
       if (k !== ch.itemId && !k.startsWith(ch.itemId + '|')) continue
@@ -362,13 +391,13 @@ const chartStats = computed(() => {
       out[ch.itemId] = { max: '-', avg: '-', min: '-' }
       continue
     }
-    const max = Math.max(...vals)
-    const min = Math.min(...vals)
-    const avg = vals.reduce((a, b) => a + b, 0) / vals.length
+    const vmax = Math.max(...vals)
+    const vmin = Math.min(...vals)
+    const vavg = vals.reduce((a, b) => a + b, 0) / vals.length
     out[ch.itemId] = {
-      max: formatChartStat(max, ch.unit),
-      avg: formatChartStat(avg, ch.unit),
-      min: formatChartStat(min, ch.unit)
+      max: formatChartStat(vmax, ch.unit),
+      avg: formatChartStat(vavg, ch.unit),
+      min: formatChartStat(vmin, ch.unit)
     }
   }
   return out

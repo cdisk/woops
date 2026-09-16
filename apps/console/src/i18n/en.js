@@ -61,8 +61,60 @@ export default {
     users: 'Users',
     audit: 'Audit',
     logout: 'Log out',
+    profile: 'Profile',
     version: 'Version',
     repository: 'Source repository'
+  },
+
+  profile: {
+    title: 'Profile',
+    account: 'Account security',
+    changePassword: 'Change password',
+    currentPassword: 'Current password',
+    newPassword: 'New password',
+    confirmPassword: 'Confirm new password',
+    savePassword: 'Save password',
+    passwordRequired: 'Enter current and new password',
+    passwordTooShort: 'New password must be at least 8 characters',
+    passwordMismatch: 'New passwords do not match',
+    passwordChanged: 'Password updated',
+    totpTitle: 'Two-factor (TOTP)',
+    totpOnHint: 'Authenticator is enrolled. After reset, the next password sign-in will require re-enrollment.',
+    totpOffHint: 'Not enrolled yet. The next password sign-in will guide authenticator setup.',
+    resetTotp: 'Reset TOTP',
+    resetTotpHint:
+      'Confirm with your current password and a 6-digit authenticator code. If you lost the authenticator, ask an admin to reset it.',
+    totpResetRequired: 'Enter current password and authenticator code',
+    totpResetDone: 'TOTP cleared; re-enroll on the next sign-in',
+    apiTokens: 'API tokens',
+    apiDoc: 'API docs',
+    apiDocLink: 'Open API docs',
+    apiDocHint:
+      'User API token reference (Markdown preview). Copy the full Markdown for scripts or another AI.',
+    copyMarkdown: 'Copy Markdown',
+    apiDocToc: 'On this page',
+    apiBaseLabel: 'Request base',
+    copyApiBase: 'Copy base',
+    apiBaseHint:
+      'Uses OPS_CONSOLE_PUBLIC_HTTP when set; otherwise the current browser origin. Paths below are relative to this base, e.g. base/api/assets.',
+    apiTokensHint:
+      'Personal read-only tokens for scripts and automation. Access follows your live asset scope; deleting a token revokes it immediately. The secret is shown only once at creation.',
+    createToken: 'Create token',
+    scopes: 'Scopes',
+    scopesRequired: 'Select at least one scope',
+    scopeAssetsHint: 'List and read assets (and groups) to discover assetId.',
+    scopeMetricsHint:
+      'Monitor items, latest, series, dashboard summary, and metrics reports (including SVG).',
+    expiresAt: 'Expires',
+    expiresDefault: 'Empty = never',
+    expiresHint: 'Leave empty for no expiry; or pick a future time.',
+    neverExpires: 'Never',
+    createdAt: 'Created',
+    lastUsedAt: 'Last used',
+    namePlaceholder: 'e.g. metrics export script',
+    tokenCreated: 'Token created',
+    tokenOnce: 'Copy and store it now. The plaintext cannot be shown again.',
+    deleteConfirm: 'Delete token “{name}”? It will stop working immediately.'
   },
 
   roles: {

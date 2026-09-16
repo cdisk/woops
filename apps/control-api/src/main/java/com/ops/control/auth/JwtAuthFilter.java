@@ -35,10 +35,21 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
+        if (SecurityContextHolder.getContext().getAuthentication() != null
+                && SecurityContextHolder.getContext().getAuthentication().isAuthenticated()) {
+            filterChain.doFilter(request, response);
+            return;
+        }
         String header = request.getHeader(HttpHeaders.AUTHORIZATION);
         if (header != null && header.startsWith("Bearer ")) {
+            String bearer = header.substring(7).trim();
+            // User API tokens are handled by ApiTokenAuthFilter.
+            if (bearer.startsWith("wpat_")) {
+                filterChain.doFilter(request, response);
+                return;
+            }
             try {
-                Claims claims = authService.parse(header.substring(7));
+                Claims claims = authService.parse(bearer);
                 UserEntity user = authService.resolveAccessUser(claims);
                 if (user == null) {
                     SecurityContextHolder.clearContext();

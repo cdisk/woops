@@ -44,9 +44,14 @@ const controlApi = (process.env.OPS_CONTROL_INTERNAL_HTTP || 'http://127.0.0.1:9
 const gatewayPublic = (process.env.OPS_GATEWAY_PUBLIC_HTTP || 'https://127.0.0.1:9200').replace(/\/$/, '')
 // Same as deploy/nginx.conf: browser WS is rewritten to Console origin, then proxied to Gateway INTERNAL.
 const gatewayInternal = (process.env.OPS_GATEWAY_INTERNAL_HTTP || 'http://127.0.0.1:9201').replace(/\/$/, '')
+/** Public Console origin for API Token docs (paths are under /api). Empty → browser location.origin at runtime. */
+const consolePublicHttp = (process.env.OPS_CONSOLE_PUBLIC_HTTP || '').replace(/\/$/, '')
 
 export default defineConfig({
   plugins: [vue(), fixGuacamoleSessionRecordingBlob()],
+  define: {
+    __WOOPS_CONSOLE_PUBLIC_HTTP__: JSON.stringify(consolePublicHttp)
+  },
   // Avoid colliding with Vue route `/assets` (nginx would 301 to the real build dir).
   build: {
     assetsDir: 'static'

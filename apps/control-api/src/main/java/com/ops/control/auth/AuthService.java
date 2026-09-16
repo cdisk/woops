@@ -213,6 +213,92 @@ public class AuthService {
         return out;
     }
 
+    /** Local-account self-service: change password (requires current password). */
+    @Transactional
+    public Map<String, String> changeOwnPassword(UserEntity user, String currentPassword, String newPassword) {
+        requireLocalAccount(user);
+        if (currentPassword == null || currentPassword.isBlank()
+                || user.getPasswordHash() == null
+                || !passwordEncoder.matches(currentPassword, user.getPasswordHash())) {
+            throw new IllegalArgumentException("invalid current password");
+        }
+        if (newPassword == null || newPassword.isBlank() || newPassword.length() < 8) {
+            throw new IllegalArgumentException("new password must be at least 8 characters");
+        }
+        if (passwordEncoder.matches(newPassword, user.getPasswordHash())) {
+            throw new IllegalArgumentException("new password must differ from current password");
+        }
+        user.setPasswordHash(passwordEncoder.encode(newPassword));
+        users.save(user);
+        audit.record(
+                ControlAuditService.CAT_USER,
+                ControlAuditService.ACT_UPDATE,
+                user.getId(),
+                user.getUsername(),
+                null,
+                null,
+                ControlAuditService.jsonDetail(Map.of("passwordChanged", true, "self", true)));
+        return Map.of("status", "ok");
+    }
+
+    /**
+     * Local-account self-service: clear TOTP so the next password login re-enrolls.
+     * Requires current password (and current TOTP code when 2FA is already enabled).
+     */
+    @Transactional
+    public Map<String, Object> resetOwnTotp(UserEntity user, String currentPassword, String totpCode) {
+        requireLocalAccount(user);
+        if (currentPassword == null || currentPassword.isBlank()
+                || user.getPasswordHash() == null
+                || !passwordEncoder.matches(currentPassword, user.getPasswordHash())) {
+            throw new IllegalArgumentException("invalid current password");
+        }
+        if (user.isTotpEnabled()) {
+            if (totpCode == null || totpCode.isBlank()) {
+                throw new IllegalArgumentException("totp code required");
+            }
+            String secret = user.getTotpSecret();
+            if (secret == null || secret.isBlank()) {
+                throw new IllegalStateException("totp secret missing");
+            }
+            var matched = totp.matchingStep(secret, totpCode.trim());
+            if (matched.isEmpty()) {
+                throw new IllegalArgumentException("invalid totp code");
+            }
+            long step = matched.getAsLong();
+            Long last = user.getTotpLastStep();
+            if (last != null && last == step) {
+                throw new IllegalArgumentException("invalid totp code");
+            }
+            user.setTotpLastStep(step);
+        }
+        user.setTotpEnabled(false);
+        user.setTotpSecret(null);
+        user.setTotpLastStep(null);
+        users.save(user);
+        audit.record(
+                ControlAuditService.CAT_USER,
+                ControlAuditService.ACT_TOTP_RESET,
+                user.getId(),
+                user.getUsername(),
+                null,
+                null,
+                ControlAuditService.jsonDetail(Map.of(
+                        "targetUserId", user.getId().toString(),
+                        "targetUsername", user.getUsername(),
+                        "self", true)));
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("status", "ok");
+        out.put("totpEnabled", false);
+        return out;
+    }
+
+    private static void requireLocalAccount(UserEntity user) {
+        if (!"local".equals(user.getAuthSource())) {
+            throw new IllegalArgumentException("only local accounts support this action");
+        }
+    }
+
     public Map<String, Object> capabilities(UserEntity user) {
         Map<String, Object> c = new LinkedHashMap<>();
         c.put("manageUsers", Roles.isSuperAdmin(user.getRole()) || Roles.isAdmin(user.getRole()));

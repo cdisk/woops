@@ -8,6 +8,7 @@ import { monitorSessionRoutes, monitorLayoutRoutes } from './monitor/routes'
 import { monitorActions } from './monitor/actions'
 import { portmapRoutes } from './portmap/routes'
 import { auditRoutes, auditMenu } from './audit/routes'
+import { profileLayoutRoutes } from './profile/routes'
 
 /** Standalone session/monitor pages (outside Layout). */
 export const standaloneRoutes = [
@@ -17,11 +18,12 @@ export const standaloneRoutes = [
   ...monitorSessionRoutes
 ]
 
-/** Feature-owned Layout child routes (portmap, monitor alerts, audit). */
+/** Feature-owned Layout child routes (portmap, monitor alerts, audit, profile). */
 export const layoutRoutes = [
   ...portmapRoutes,
   ...monitorLayoutRoutes,
-  ...auditRoutes
+  ...auditRoutes,
+  ...profileLayoutRoutes
 ]
 
 /** Sidebar audit submenu. */

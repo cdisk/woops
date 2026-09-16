@@ -46,6 +46,7 @@ public class ControlAuditService {
     public static final String ACT_UPDATE_AGENT = "UPDATE_AGENT";
     public static final String ACT_IGNORE = "IGNORE";
     public static final String ACT_UNIGNORE = "UNIGNORE";
+    public static final String ACT_REPORT_READ = "REPORT_READ";
 
     private final ControlAuditEventRepository events;
     private final AssetRepository assets;

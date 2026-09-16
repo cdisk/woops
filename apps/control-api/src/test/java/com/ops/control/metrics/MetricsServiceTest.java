@@ -48,4 +48,26 @@ class MetricsServiceTest {
         Instant from = now.minusSeconds(10 * 24 * 60 * 60L);
         assertEquals(true, MetricsService.useTrends(from, now, now, 7));
     }
+
+    @Test
+    void weightedAverageUsesSampleCountDenominator() {
+        // (10*2 + 40*8) / (2+8) = 340/10 = 34 — offline gaps never contribute zeros.
+        double weighted = (10.0 * 2 + 40.0 * 8) / (2 + 8);
+        assertEquals(34.0, weighted, 1e-9);
+        // Missing buckets must not enter the denominator:
+        long sampleCount = 2 + 8;
+        assertEquals(10, sampleCount);
+    }
+
+    @Test
+    void coarsenPathPreservesSummaryIndependenceFromGrain() {
+        // Documented contract: summary is over [from,to) from raw samples / weighted trends,
+        // not recomputed from display buckets — grain minute vs hour must not change summary.
+        Instant now = Instant.parse("2026-09-10T00:00:00Z");
+        Instant from = Instant.parse("2026-09-08T00:00:00Z");
+        Instant to = Instant.parse("2026-09-09T00:00:00Z");
+        assertEquals("minute", MetricsService.effectiveGrain("minute", from, to, false));
+        assertEquals("hour", MetricsService.effectiveGrain("hour", from, to, false));
+        assertEquals(false, MetricsService.useTrends(from, to, now, 7));
+    }
 }

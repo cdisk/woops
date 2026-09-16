@@ -57,7 +57,10 @@
       <el-header v-if="!isReplay" class="header" height="var(--ops-header-height)">
         <h1 class="header-title">{{ pageTitle }}</h1>
         <div class="header-right">
-          <span class="meta">{{ user }} · {{ roleLabel }}</span>
+          <span class="meta">
+            <router-link class="profile-link" to="/profile">{{ user }}</router-link>
+            · {{ roleLabel }}
+          </span>
           <el-button link type="danger" class="logout" @click="logout">{{ t('nav.logout') }}</el-button>
         </div>
       </el-header>
@@ -272,6 +275,16 @@ onMounted(async () => {
 .meta {
   color: var(--ops-text-secondary);
   font-size: 13px;
+}
+
+.profile-link {
+  color: var(--ops-text);
+  text-decoration: none;
+  font-weight: 500;
+}
+
+.profile-link:hover {
+  color: var(--ops-color-primary);
 }
 
 .logout {
