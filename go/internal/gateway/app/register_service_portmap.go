@@ -45,9 +45,10 @@ func init() {
 		s.Register("/ws/opsctl/portmap-forward/udp", service.HandleOpsctlForward("udp"))
 		s.Register("/ws/opsctl/portmap-reverse-control", service.HandleOpsctlReverseControl)
 		s.Register("/ws/opsctl/portmap-reverse-data", service.HandleOpsctlReverseData)
-		s.Register("/internal/portmap/listening-ports", service.HandleListeningPorts)
-		s.Register("/internal/portmap/list", service.HandleList)
-		s.Register("/internal/portmap/open", service.HandleOpen)
-		s.Register("/internal/portmap/close", service.HandleClose)
+		// Unauthenticated by design (control-api only) → internal listener only.
+		s.RegisterInternal("/internal/portmap/listening-ports", service.HandleListeningPorts)
+		s.RegisterInternal("/internal/portmap/list", service.HandleList)
+		s.RegisterInternal("/internal/portmap/open", service.HandleOpen)
+		s.RegisterInternal("/internal/portmap/close", service.HandleClose)
 	})
 }

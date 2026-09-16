@@ -50,6 +50,7 @@ type Server struct {
 	pending            *sessioncore.PendingSessions
 	http               *http.Client
 	mux                *http.ServeMux
+	internalMux        *http.ServeMux
 	extensionsMu       sync.RWMutex
 	controlHandlers    map[string]ControlHandler
 	agentOnlineHooks   []AgentLifecycleHook
@@ -97,6 +98,7 @@ func New(cfg Config) *Server {
 		pending:            sessioncore.NewPendingSessions(),
 		http:               &http.Client{Timeout: 10 * time.Second},
 		mux:                http.NewServeMux(),
+		internalMux:        http.NewServeMux(),
 		instanceID:         instanceID,
 		controlHandlers:    make(map[string]ControlHandler),
 		allowedTicketTypes: make(map[string]struct{}),
@@ -111,6 +113,9 @@ func New(cfg Config) *Server {
 		}
 	}
 	s.registerCoreRoutes()
+	// nginx proxies /ws/, /i/ and /bin/ through the internal listener, so it must
+	// also serve every public route. Specific internal patterns still win.
+	s.internalMux.Handle("/", s.mux)
 	return s
 }
 
@@ -140,8 +145,19 @@ func (s *Server) Register(pattern string, handler http.HandlerFunc) {
 	s.mux.HandleFunc(pattern, handler)
 }
 
-// Handler returns the fully composed application mux.
+// RegisterInternal attaches a control-plane-only route. These handlers carry no
+// authentication of their own: control-api is the only caller, so they must stay
+// off the public listener. Never move them to Register.
+func (s *Server) RegisterInternal(pattern string, handler http.HandlerFunc) {
+	s.internalMux.HandleFunc(pattern, handler)
+}
+
+// Handler returns the public mux (agents / woopsctl / browser).
 func (s *Server) Handler() http.Handler { return s.mux }
+
+// InternalHandler returns the control-api-facing mux: internal routes plus the
+// public routes nginx reverse-proxies through this listener.
+func (s *Server) InternalHandler() http.Handler { return s.internalMux }
 
 func (s *Server) RegisterControlHandler(typ string, handler ControlHandler) {
 	typ = strings.TrimSpace(typ)

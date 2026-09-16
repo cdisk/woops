@@ -60,6 +60,7 @@ func main() {
 	}()
 
 	handler := srv.Handler()
+	internalHandler := srv.InternalHandler()
 	cert := strings.TrimSpace(*tlsCert)
 	key := strings.TrimSpace(*tlsKey)
 	if (cert == "") != (key == "") {
@@ -70,7 +71,7 @@ func main() {
 	if internalAddr != "" {
 		go func() {
 			log.Printf("gateway INTERNAL http on %s (control-api→gateway)", internalAddr)
-			if err := http.ListenAndServe(internalAddr, handler); err != nil {
+			if err := http.ListenAndServe(internalAddr, internalHandler); err != nil {
 				log.Fatalf("internal listen: %v", err)
 			}
 		}()

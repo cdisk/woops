@@ -4,7 +4,7 @@
 > 任何功能新增、完成、搁置、行为变更，都必须先读本文件，并在同一变更中更新对应条目的状态与说明。  
 > README 只保留快速启动。历史设计稿 `bastion_architecture_design_*.plan.md` 不必再读。
 
-**最后更新：** 2026-09-16（发布 0.1.3：API Token / 指标报表 / Deploy Token 删除）
+**最后更新：** 2026-09-16（发布 0.1.4：Gateway 内部路由不再上公网监听）
 
 ---
 
@@ -47,7 +47,7 @@
 |------|------|------|
 | `[x]` | Monorepo 骨架 | `apps/console`、`apps/control-api`、`go/{gateway,agent}`、`go/cmd/woopsctl`、`go/internal/opsctl`、`deploy/`；环境变量 `.env.example` → 本机 `.env`（不入库）+ README 编译/启动；许可证 Apache-2.0 |
 | `[x]` | PostgreSQL + TimescaleDB | Compose 用 **`timescale/timescaledb:2.29.2-pg16`**（监控依赖扩展；`command` 设 `shared_preload_libraries=timescaledb`）；Java 唯一写库；**不用 H2**。默认账密 `ops`/`ops`（生产务必改）；compose 映射宿主 `:5432` 给本机工具，公网靠防火墙关掉。**control-api 启动**幂等执行 `CREATE EXTENSION` / `create_hypertable` / 压缩策略（`MetricsTimescaleBootstrap`，打进 control-api 镜像） |
-| `[x]` | docker-compose 全栈 | **拉镜像**：根目录 [`docker-compose.yml`](docker-compose.yml) → Hub `cdisk/woops-{console,control-api,gateway}`（默认标签 `WOOPS_IMAGE_TAG=0.1.3`）；README §A 快速启动；**`tls-init`**：无 `deploy/tls/gateway.*` 时按 PUBLIC URL 自签，并刷新 [`deploy/compose-pin.env`](deploy/compose-pin.env)（SPKI，供 control-api/gateway）。**源码构建**：[`deploy/docker-compose.yml`](deploy/docker-compose.yml)。`deploy/env.prod.example`；服务器 `/opt/ops`（**10.255.17.30**）；profiles `full`+`desktop`；**Gateway `network_mode: host`**；TLS 挂 `deploy/tls`（gitignore）；`Dockerfile.control-api` 用阿里云 Maven + BuildKit `/root/.m2` 缓存。full 另映射 control-api `:9100`、guacd `:4822`（公网靠防火墙）。**「重新部署」**：见 `.cursor/rules/redeploy.mdc`（17.30 源码构建 + Hub 推送 `$ver`/`latest` + 升 compose 默认标签） |
+| `[x]` | docker-compose 全栈 | **拉镜像**：根目录 [`docker-compose.yml`](docker-compose.yml) → Hub `cdisk/woops-{console,control-api,gateway}`（默认标签 `WOOPS_IMAGE_TAG=0.1.4`）；README §A 快速启动；**`tls-init`**：无 `deploy/tls/gateway.*` 时按 PUBLIC URL 自签，并刷新 [`deploy/compose-pin.env`](deploy/compose-pin.env)（SPKI，供 control-api/gateway）。**源码构建**：[`deploy/docker-compose.yml`](deploy/docker-compose.yml)。`deploy/env.prod.example`；服务器 `/opt/ops`（**10.255.17.30**）；profiles `full`+`desktop`；**Gateway `network_mode: host`**；TLS 挂 `deploy/tls`（gitignore）；`Dockerfile.control-api` 用阿里云 Maven + BuildKit `/root/.m2` 缓存。full 另映射 control-api `:9100`、guacd `:4822`（公网靠防火墙）。**「重新部署」**：见 `.cursor/rules/redeploy.mdc`（17.30 源码构建 + Hub 推送 `$ver`/`latest` + 升 compose 默认标签） |
 | `[x]` | guacd sidecar | `deploy/docker-compose.yml` → `guacamole/guacd:1.5.5`（发布宿主 `:4822`）；Gateway `OPS_GUACD_ADDR=127.0.0.1:4822`、`OPS_GUAC_BRIDGE_HOST=host.docker.internal`；console/control-api/guacd 配 `extra_hosts: host.docker.internal:host-gateway` |
 | `[x]` | `data/ops-audit/` 卷 | 运行态 JSONL **与会话录像**的本地根目录；`OPS_AUDIT_DIR`（默认 `./data/ops-audit`；Compose `/data/ops-audit` 同时挂 control-api / gateway / guacd）；已 gitignore |
 | `[ ]` | `openapi/` 契约 | Java REST → Vue TS client |
@@ -60,7 +60,7 @@
 | `[~]` | 协议兼容测试 / 集成测试 | `internal/protocol/control` open_session nested-params golden 已有；Agent→Gateway→echo / Testcontainers 仍缺 |
 | `[x]` | 运行时 | 控制面 **Java 21** + Spring Boot 3；Go **`go 1.20`**（模块最低版本；日常可用 Go 1.22+ 编译；legacy Agent 须 **`GOTOOLCHAIN=go1.20.14`**）；Vue 3 + Element Plus；图标 `@tabler/icons-vue` |
 | `[x]` | Console 中英 i18n | `vue-i18n`（`legacy:false`）；仅 `en`/`zh`；**默认英文**，`navigator.language` 以 `zh` 开头则中文；目录 `apps/console/src/i18n/{en,zh,index}.js`；`App.vue` 用 `el-config-provider` 同步 Element Plus locale；SFC `useI18n()`，纯 JS `import { t } from '…/i18n'`；控制台可见文案已迁入目录（含 Layout/Login/资产/用户/审计/会话/文件/桌面/端口映射/监控等） |
-| `[x]` | Console 视觉（冷静工程风） | 全局 `styles/{tokens,element-theme,base}.css`；主色 `#2F5D9F`、浅色底；字体 **IBM Plex Sans/Mono** 经 `@fontsource` **同源自托管**（无 Google Fonts CDN）；登录品牌首屏；Layout 侧栏图标+**顶栏显示当前页标题**（路由 `meta.titleKey`，页内不再重复大标题）；侧栏底部 **版本号**（`package.json` → `v0.1.3`）+ **源码链接**（`https://gitee.com/cdisk/woops`）；业务页筛选/操作留在内容区工具条；会话页顶栏抛光（桌面页保持暗色功能面）；**favicon** `public/favicon.svg`（主）+ `.ico` / apple-touch PNG；登录与侧栏品牌点同源 SVG |
+| `[x]` | Console 视觉（冷静工程风） | 全局 `styles/{tokens,element-theme,base}.css`；主色 `#2F5D9F`、浅色底；字体 **IBM Plex Sans/Mono** 经 `@fontsource` **同源自托管**（无 Google Fonts CDN）；登录品牌首屏；Layout 侧栏图标+**顶栏显示当前页标题**（路由 `meta.titleKey`，页内不再重复大标题）；侧栏底部 **版本号**（`package.json` → `v0.1.4`）+ **源码链接**（`https://gitee.com/cdisk/woops`）；业务页筛选/操作留在内容区工具条；会话页顶栏抛光（桌面页保持暗色功能面）；**favicon** `public/favicon.svg`（主）+ `.ico` / apple-touch PNG；登录与侧栏品牌点同源 SVG |
 | `[x]` | 共享资产树选择器 | `shared/AssetTreeSelect.vue` + `assetTree.js`：分组树 + 可选资产节点；**可搜索**（名称/主机名/公网·内网 IP）；分组不可选；端口映射创建与控制/操作/资产事件审计筛选共用 |
 
 ---
@@ -284,7 +284,7 @@
 | `[x]` | Agent token 哈希存储 | 注册换成长效凭据；BCrypt 存库 |
 | `[x]` | 部署 Token 哈希 | SHA-256 存库；明文只创建时展示一次 |
 | `[x]` | 用户密码 | BCrypt；本地登录强制 TOTP + 同一步长防重放；pending JWT 不能当会话 |
-| `[x]` | Agent 凭据 header | 控制/会话/metrics WSS 用 Header；安装码公开短 TTL（15min，可多次使用，熵约 192 bit） |
+| `[x]` | Agent 凭据 header | 控制/会话/metrics WSS 用 Header；安装码公开短 TTL（15min，可多次使用，**8 字节 = 64 bit** 熵，在线爆破不可行） |
 | `[x]` | 短时会话票据 | shell/文件/桌面/exec 约 90s；portmap 约 120s；发票前校验资产可见性 |
 | `[x]` | 资产 API 不回传桌面密码 | 仅 `hasDesktopPassword` |
 | `[x]` | 全站 TLS / 反代 | Gateway PUBLIC https/wss（Agent/woopsctl）；Console Docker HTTPS + nginx `/api/`→control-api（**不**转 `/api/internal`、`/api/sessions/internal`、`/api/opsctl`，404）、`/ws` `/i/` `/bin/`→Gateway **INTERNAL**（`:9201`）；浏览器会话 WS **同源改写** `rewriteWs`（避免自签 :9200 二次信任；`.env.example`「不再改写主机」注释已过时）。本地 Vite 开发代理仍把整个 `/api` 转到 9100（本机）。对内 control↔gateway 明文 http；Agent/woopsctl 用 pin 或公有 CA |
@@ -292,6 +292,7 @@
 | `[x]` | 公网 IP 不信 XFF（控制 WSS） | 上线写入用 TCP `RemoteAddr`。注册 HTTP `AgentController` **仍读 X-Forwarded-For**（仅当 9100 可从不可信网络访问时有意义；生产靠防火墙） |
 | `[x]` | 录像取用防穿越 | `normalize()` 后必须仍在 `OPS_AUDIT_DIR` 根内 |
 | `[x]` | 生产端口暴露 | 防火墙/安全组只放 **443**、**9200**（及正向 portmap 20000–21000）。compose 映射 9100/5432/4822、Gateway 听 `:9201` 是给宿主机/容器互调，**不改绑环回**（9201 绑环回会断 console）。无防火墙时这些口对公网可达，是部署问题不是代码洞 |
+| `[x]` | Gateway 公网 / 内网 mux 分离 | **0.1.4 修**：`core` 有独立 `internalMux`；`RegisterInternal` 的路由（`/internal/portmap/{open,close,list,listening-ports}`，本身无鉴权、只供 control-api）**只挂内网 listener**，公网 `Handler()` 返回 404。此前 `cmd/gateway` 把同一 mux 同时交给 9200/9201，导致未认证公网调用者可枚举/关闭端口映射（泄露资产 UUID 与内网目标），并令 Gateway 在宿主 `0.0.0.0` 绑任意端口——放开 20000–21000 后即成未认证内网隧道。回归测试 `core/internal_routes_test.go` 锁死「内部路由不得出现在公网 handler」；新增内部路由**必须**用 `RegisterInternal` |
 | `[x]` | 登录限速与 JWT 禁用即失效 | 本地登录/TOTP/GitLab 兑换：10 次失败锁 15 分钟（内存，按 IP+身份，429）。`JwtAuthFilter` 每次查库：禁用/软删 → 401；角色以库为准。发票走 `requireUser` |
 | `[x]` | GitLab 回调一次性 code | 回调 JWT 存内存 60s；跳转 `/login?code=`；`POST /api/auth/gitlab/exchange` 兑换。不再把 JWT 放 query |
 | `[~]` | 录像目录权限与校验和 | 日分区 `0755`、录像叶子 `0777`（供 guacd）、cast `0640`；END 记 sha256+size。**缺**独立配额 |
