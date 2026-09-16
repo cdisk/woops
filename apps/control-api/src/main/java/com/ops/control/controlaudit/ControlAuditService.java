@@ -26,8 +26,10 @@ public class ControlAuditService {
     public static final String CAT_ASSET = "ASSET";
     public static final String CAT_GROUP = "GROUP";
     public static final String CAT_PORTMAP = "PORTMAP";
-    /** Deploy token lifecycle (create / revoke), not opsctl runtime usage. */
+    /** Deploy token lifecycle (create / remove), not opsctl runtime usage. */
     public static final String CAT_CI = "CI";
+    /** User API token lifecycle (create / remove), personal center. */
+    public static final String CAT_API_TOKEN = "API_TOKEN";
     public static final String CAT_MONITOR = "MONITOR";
 
     public static final String ACT_LOGIN = "LOGIN";

@@ -15,6 +15,7 @@
           <el-option :label="t('audit.control.catGroup')" value="GROUP" />
           <el-option :label="t('audit.control.catPortmap')" value="PORTMAP" />
           <el-option :label="t('audit.control.catCi')" value="CI" />
+          <el-option :label="t('audit.control.catApiToken')" value="API_TOKEN" />
           <el-option :label="t('audit.control.catMonitor')" value="MONITOR" />
         </el-select>
         <AssetTreeSelect
@@ -102,6 +103,7 @@ function categoryLabel(c) {
     GROUP: t('audit.control.catGroup'),
     PORTMAP: t('audit.control.catPortmap'),
     CI: t('audit.control.catCi'),
+    API_TOKEN: t('audit.control.catApiToken'),
     MONITOR: t('audit.control.catMonitor')
   })[c] || c
 }

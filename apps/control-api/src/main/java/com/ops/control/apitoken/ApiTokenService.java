@@ -68,7 +68,7 @@ public class ApiTokenService {
         detail.put("scopes", scopeSet);
         detail.put("expiresAt", exp == null ? "" : exp.toString());
         audit.record(
-                ControlAuditService.CAT_USER,
+                ControlAuditService.CAT_API_TOKEN,
                 ControlAuditService.ACT_CREATE,
                 user.getId(),
                 user.getUsername(),
@@ -99,7 +99,7 @@ public class ApiTokenService {
         detail.put("scopes", ApiTokenScopes.fromStored(entity.getScopes()));
         tokens.delete(entity);
         audit.record(
-                ControlAuditService.CAT_USER,
+                ControlAuditService.CAT_API_TOKEN,
                 ControlAuditService.ACT_REMOVE,
                 user.getId(),
                 user.getUsername(),

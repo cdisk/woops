@@ -4,7 +4,7 @@
 > 任何功能新增、完成、搁置、行为变更，都必须先读本文件，并在同一变更中更新对应条目的状态与说明。  
 > README 只保留快速启动。历史设计稿 `bastion_architecture_design_*.plan.md` 不必再读。
 
-**最后更新：** 2026-09-16（Deploy Token 吊销改为直接删除）
+**最后更新：** 2026-09-16（API Token 审计类别改为 API_TOKEN）
 
 ---
 
@@ -78,7 +78,7 @@
 | `[~]` | 短时网关票据策略 | Java 已发 shell/filemanager/filetransfer/rdp/vnc/**exec** 票据（约 90s；`exec` 供控制台一键更新与 woopsctl）；按协议 `ProtocolTicketIssuer` 分发（`ProtocolRegistry`）；portmap 另 `PortmapTicketIssuer`（120s 原始 JWT）；目标 30–60s 后续统一；发票前校验资产可见性 |
 | `[x]` | 多用户管理 UI | `/users`：顶栏本地搜索（用户名/昵称/角色/来源）；建用户（用户名/昵称/密码）、启用/禁用、软删、超管改角色、设可见范围（混合树：组+资产）；管理员仅管 MEMBER；顶栏优先显示昵称；软删释放用户名，GitLab 再登会新建且启用；禁用后 GitLab 再登仍拒绝；本地用户列 **2FA** 状态，管理员可重置 TOTP |
 | `[x]` | 个人中心 | `/profile`（顶栏用户名进入）：**API Token**（含 `assets:read` / `metrics:read`）；**API 说明**（Markdown 预览 + 复制全文）；本地账密用户另有 **账号安全**（改密码、重置 TOTP，需验证当前密码；已绑定时重置还需当前验证码；丢失验证器仍走管理员重置） |
-| `[x]` | 审计拆表 | **控制面** `control_audit_events`；**对服** `server_operation_records`（Gateway JSONL → Java 偏移 ingest；Shell/文件/EXEC/桌面录像/portmap）；**资产事件** `asset_events`（系统观测：上下线等，非人为）；`GET /api/server-operations`(+recording)、`GET /api/control-audit`、`GET /api/asset-events` 均支持 `page`/`pageSize` → `{items,total,…}`。`status` 含 `PURGED`。旧表 `audit_events`/`port_mapping_connections` 已退役。**全员强制录制**。控制审计类别含 `MONITOR`（首页预警忽略/取消忽略、指标报表 `REPORT_READ`）与用户 API Token 的 `USER`/`CREATE`/`REMOVE` |
+| `[x]` | 审计拆表 | **控制面** `control_audit_events`；**对服** `server_operation_records`（Gateway JSONL → Java 偏移 ingest；Shell/文件/EXEC/桌面录像/portmap）；**资产事件** `asset_events`（系统观测：上下线等，非人为）；`GET /api/server-operations`(+recording)、`GET /api/control-audit`、`GET /api/asset-events` 均支持 `page`/`pageSize` → `{items,total,…}`。`status` 含 `PURGED`。旧表 `audit_events`/`port_mapping_connections` 已退役。**全员强制录制**。控制审计类别含 `MONITOR`（首页预警忽略/取消忽略、指标报表 `REPORT_READ`）与用户 API Token 的 **`API_TOKEN`/`CREATE`/`REMOVE`**（与用户账号 `USER` 分离；部署 Token 为 `CI`） |
 | `[x]` | 审计日志页（控制审计） | 控制台 `/audit/control` → `GET /api/control-audit?page&pageSize`（`{items,total,page,pageSize}`，默认 50/页）；有资产按可见范围，分组按可见分组，登录/用户类管理员可见（成员仅自己的登录）；列表分组独立列；资产筛选用 **AssetTreeSelect**（可搜索），`?assetId=` 深链；类别含监控忽略 |
 | `[x]` | 操作审计页 | 侧栏「审计」下拆「控制审计」/「操作审计」/「资产事件」；操作审计内 **tab**：会话操作（排除 `PORTMAP_*`）/ 端口连接（仅隧道连通）；端口映射**清单配置**仍在控制审计 `PORTMAP`；`features/audit/{control,operations,assetevents,shared}`；`GET /api/server-operations?scope=session|portmap&page&pageSize`；列表分组独立列；资产筛选 **AssetTreeSelect**；终端 `asciinema-player`；桌面 `Guacamole.SessionRecording` 页内回放；资产详情可跳操作审计/控制审计/资产事件 |
 | `[x]` | 资产事件页 | `/audit/asset-events` → `GET /api/asset-events?page&pageSize`（返回 `{items,total,page,pageSize}`，默认 50/页）；记 **上线/离线**（detail：`sourceIp`/`privateIp`/`agentVersion`/`reason`/`gatewayInstance`/`connectionId`）与 **内网 IP 变化**（`from`/`to`）；列表：分组独立列、详情列展示公网/内网/版本/原因，悬停 tip 含 Gateway/连接 ID；按资产可见范围分页；资产筛选 **AssetTreeSelect**；`?assetId=` |
