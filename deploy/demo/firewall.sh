@@ -5,8 +5,9 @@
 #   80   acme.sh standalone 续期校验
 #   443  Console
 #   9200 Gateway PUBLIC（Agent / 安装脚本 / woopsctl）
-# 特别要挡住的是 Gateway 的 9201 INTERNAL——它走 host 网络，直接监听在 0.0.0.0，
-# 本身无鉴权，只该给 control-api 用。
+# Gateway 9201 INTERNAL 走 host 网络、监听 0.0.0.0、本身无鉴权，公网接口绝不能放。
+# 但 console 经 host.docker.internal 反代 /ws/ 到 9201，报文从 docker 网桥进 INPUT，
+# 所以 docker0 / br+ 上的 9201 必须放行，否则 Shell/文件会一直「连接中」。
 #
 # 另外掐断演示 Agent 容器的出网：子网 FORWARD 全丢，只剩「容器 → 宿主机」
 # （那条走 INPUT 不经 FORWARD），够连 Gateway，但装不了包也传不出东西。
@@ -31,6 +32,12 @@ iptables -A INPUT -i lo -j ACCEPT
 iptables -A INPUT -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
 iptables -A INPUT -p icmp --icmp-type echo-request -j ACCEPT
 iptables -A INPUT -p tcp -m multiport --dports 22,80,443,9200 -j ACCEPT
+# Gateway INTERNAL 9201 监听 0.0.0.0、无鉴权，公网（eth0）绝不能放。
+# 但 console / control-api 经 host.docker.internal（= docker0 的 172.17.0.1）打过来，
+# 报文从 compose 网桥进 INPUT，不是 lo。不放这条，浏览器 /ws/shell、/ws/file-manager
+# 会卡在「连接中」，nginx 日志是 upstream timed out → 172.17.0.1:9201。
+iptables -A INPUT -p tcp --dport 9201 -i docker0 -j ACCEPT
+iptables -A INPUT -p tcp --dport 9201 -i br+ -j ACCEPT
 iptables -P INPUT DROP
 
 echo "==> DOCKER-USER（演示 Agent 出网）"
