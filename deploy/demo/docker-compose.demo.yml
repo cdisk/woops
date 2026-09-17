@@ -3,8 +3,18 @@
 #     --env-file .env --profile full --profile desktop up -d
 #
 # 做两件事：
-#   1. 撤掉根 compose 对外发布的 5432 / 9100 / 4822（根 compose 为本机调试方便而发布，
+#   1. 收掉根 compose 对外发布的 5432 / 9100 / 4822（根 compose 为本机调试方便而发布，
 #      公网演示环境不能留；Postgres 账密在根 compose 里是硬编码的 ops/ops）。
+#
+#      注意不能一律 `!override []`：gateway 是 network_mode: host，它按
+#      OPS_CONTROL_INTERNAL_HTTP=http://127.0.0.1:9100 和 OPS_GUACD_ADDR=127.0.0.1:4822
+#      走宿主机回环找 control-api / guacd。端口一撤，Agent 注册立刻 502。
+#      所以这两个改绑 127.0.0.1，只有 postgres 能真的撤——control-api 是走
+#      compose 网络按服务名连它的，宿主机侧没人需要。
+#
+#      另外：docker 发布端口是 PREROUTING DNAT + FORWARD(DOCKER 链)，**不经过 INPUT**，
+#      firewall.sh 的 INPUT 规则管不到它们。让它们不上公网靠的是「绑回环」这件事本身，
+#      不是防火墙。（反过来，host 网络的 gateway 9200/9201 才归 INPUT 管。）
 #   2. 起若干容器化 Agent 当演示资产。容器文件系统是一次性的，只有身份文件落在
 #      具名卷里，所以定时重置只需重建容器，不用重新发安装码。
 #
@@ -12,10 +22,14 @@
 # 只留「容器 → 宿主机」这条（走 INPUT，不经 FORWARD），够它连 Gateway 9200。
 
 x-demo-agent: &demo-agent
+  # 路径相对「项目目录」＝根 docker-compose.yml 所在目录，不是本文件所在目录。
   build:
-    context: .
+    context: ./deploy/demo
     dockerfile: Dockerfile.agent
-  image: woops-demo-agent:local
+    args:
+      # Agent 二进制从 gateway 镜像里拷，跟着同一个 tag 走。
+      WOOPS_IMAGE_TAG: ${WOOPS_IMAGE_TAG}
+  image: woops-demo-agent:${WOOPS_IMAGE_TAG}
   environment:
     WOOPS_GATEWAY: ${OPS_GATEWAY_PUBLIC_HTTP}
   # 让 Agent 用真实域名连 Gateway（证书 SAN 要匹配），但解析到宿主机，
@@ -31,11 +45,14 @@ services:
     ports: !override []
 
   control-api:
-    ports: !override []
+    ports: !override ["127.0.0.1:9100:9100"]
 
   guacd:
-    ports: !override []
+    ports: !override ["127.0.0.1:4822:4822"]
 
+  # WOOPS_CODE_* 只在「首次上线」这一次需要：Agent 注册拿到 asset-id / agent-token
+  # 后就落进具名卷，之后重建容器不再读安装码。所以这几个变量平时留空即可，
+  # 用 deploy/demo/seed-assets.sh 在需要时临时注入。
   demo-agent-web01:
     <<: *demo-agent
     hostname: web-01
@@ -43,6 +60,7 @@ services:
     environment:
       WOOPS_GATEWAY: ${OPS_GATEWAY_PUBLIC_HTTP}
       WOOPS_DEMO_ROLE: web
+      WOOPS_INSTALL_CODE: ${WOOPS_CODE_WEB:-}
     volumes:
       - agent_id_web01:/etc/woops-agent
 
@@ -53,6 +71,7 @@ services:
     environment:
       WOOPS_GATEWAY: ${OPS_GATEWAY_PUBLIC_HTTP}
       WOOPS_DEMO_ROLE: web
+      WOOPS_INSTALL_CODE: ${WOOPS_CODE_WEB:-}
     volumes:
       - agent_id_web02:/etc/woops-agent
 
@@ -63,6 +82,7 @@ services:
     environment:
       WOOPS_GATEWAY: ${OPS_GATEWAY_PUBLIC_HTTP}
       WOOPS_DEMO_ROLE: db
+      WOOPS_INSTALL_CODE: ${WOOPS_CODE_DB:-}
     volumes:
       - agent_id_db01:/etc/woops-agent
 
@@ -73,6 +93,7 @@ services:
     environment:
       WOOPS_GATEWAY: ${OPS_GATEWAY_PUBLIC_HTTP}
       WOOPS_DEMO_ROLE: jump
+      WOOPS_INSTALL_CODE: ${WOOPS_CODE_JUMP:-}
     volumes:
       - agent_id_jump01:/etc/woops-agent
 

@@ -12,11 +12,16 @@
 # （那条走 INPUT 不经 FORWARD），够连 Gateway，但装不了包也传不出东西。
 #
 # 注意：Docker 发布的端口经 nat/FORWARD，不过 INPUT，所以这里的 INPUT 策略
-# 不会误伤 console 的 443；反过来也意味着光靠 INPUT 挡不住容器发布的端口，
-# 所以根 compose 发布的 5432/9100/4822 是在 docker-compose.demo.yml 里撤掉的。
+# 不会误伤 console 的 443；反过来也意味着光靠 INPUT 挡不住容器发布的端口。
+# 根 compose 发布的 5432/9100/4822 因此是在 docker-compose.demo.yml 里处理的：
+# 5432 直接撤掉，9100/4822 改绑 127.0.0.1（host 网络的 gateway 还要用）。
+#
+# iptables 规则重启即失效，且 docker 每次启动会重建自己的链，所以用
+# `INSTALL_UNIT=1 bash firewall.sh` 装一个 systemd unit，在 docker 之后跑本脚本。
 set -euo pipefail
 
 AGENT_SUBNET="${AGENT_SUBNET:-172.31.66.0/24}"
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
 
 echo "==> INPUT"
 # 先放开再重建，避免清空到加回规则之间把自己的 SSH 关在门外。
@@ -36,6 +41,29 @@ if iptables -L DOCKER-USER -n >/dev/null 2>&1; then
   iptables -A DOCKER-USER -j RETURN
 else
   echo "    DOCKER-USER 链不存在（Docker 未启动？），跳过" >&2
+fi
+
+if [ "${INSTALL_UNIT:-0}" = "1" ]; then
+  echo "==> 安装 systemd unit（开机 + docker 之后重新落规则）"
+  cat > /etc/systemd/system/woops-demo-firewall.service <<EOF
+[Unit]
+Description=Woops demo firewall rules
+# docker 启动时会重建 DOCKER-USER，必须排在它后面，否则规则会被冲掉。
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/bash $SELF
+Environment=AGENT_SUBNET=$AGENT_SUBNET
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl daemon-reload
+  systemctl enable woops-demo-firewall.service >/dev/null
+  echo "    已 enable woops-demo-firewall.service"
 fi
 
 echo "==> 当前规则"

@@ -18,8 +18,10 @@ COPY --from=bin /app/bin/woops-agent-linux-amd64 /usr/local/bin/woops-agent
 RUN chmod +x /usr/local/bin/woops-agent
 
 # 一点像样的内容，好让文件管理和 Shell 看起来不是空盒子。
+# 注意：RUN 走 /bin/sh（Debian 上是 dash），没有花括号展开，目录得一个个列。
 RUN set -eux; \
-    mkdir -p /srv/app/{config,releases,static} /srv/backup /var/log/demo-app; \
+    mkdir -p /srv/app/config /srv/app/releases /srv/app/static \
+             /srv/backup /var/log/demo-app; \
     printf '%s\n' \
       'server {' \
       '    listen 8080;' \
