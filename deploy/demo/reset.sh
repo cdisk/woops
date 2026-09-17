@@ -28,6 +28,19 @@ export OPS_DEMO_DOMAIN
 
 log "=== 重置开始 ==="
 
+# 0) 清掉 compose 重建留下的改名残壳（形如 <12位id>_ops-demo-broker-1）。
+#    本脚本用 flock 自保，但手动 compose 操作不拿这把锁；两者撞上会让重建
+#    半途而废，残壳继续占着容器名，之后每个整点都会 "name is already in use"
+#    而失败。故每次重置先扫一遍，让碰撞只坏一个小时。
+log "清理重建残壳"
+#    两种命名都要管：compose 默认名 <project>-<svc>-1，以及 Agent 的 container_name。
+docker ps -a --format '{{.Names}}' \
+  | grep -E "^[0-9a-f]{12}_(${PROJECT}-[a-z-]+-[0-9]+|woops-demo-[a-z0-9]+)$" \
+  | while read -r stale; do
+      log "  删除残壳 $stale"
+      docker rm -f "$stale" >/dev/null 2>&1 || true
+    done
+
 # 1) 先停 Agent，避免它们在库被清理时反复重连。
 log "停止演示 Agent"
 for a in "${AGENTS[@]}"; do
