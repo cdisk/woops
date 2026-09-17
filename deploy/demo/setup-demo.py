@@ -29,7 +29,22 @@ OPS_DIR = os.path.dirname(os.path.dirname(HERE))
 SECRETS_FILE = os.path.join(HERE, ".demo-secrets.env")
 DEMO_ENV_FILE = os.path.join(HERE, "demo.env")
 
-DOMAIN = os.environ.get("OPS_DEMO_DOMAIN") or sys.exit("需要设置 OPS_DEMO_DOMAIN")
+
+
+def _env_value(key, path):
+    """只为了在设置常量前读一个值，不依赖下面的 load_env_file。"""
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if line.startswith(key + "="):
+                    return line.split("=", 1)[1].strip()
+    return ""
+
+
+DOMAIN = (os.environ.get("OPS_DEMO_DOMAIN")
+          or _env_value("OPS_DEMO_DOMAIN", os.path.join(OPS_DIR, ".env")))
+if not DOMAIN:
+    sys.exit("拿不到域名：设置 OPS_DEMO_DOMAIN，或在 %s/.env 里配好" % OPS_DIR)
 BASE = "https://%s" % DOMAIN
 DEMO_USER = os.environ.get("DEMO_USERNAME", "demo")
 DEMO_GROUP = os.environ.get("DEMO_GROUP", "Demo Servers")
@@ -182,13 +197,18 @@ def cleanup(token, keep_asset_ids, admin_user):
             except Exception:
                 pass
 
-    for g in as_list(call("/api/groups", token=token)):
-        if g.get("name") != DEMO_GROUP:
-            try:
-                call("/api/groups/%s" % g["id"], token=token, method="DELETE")
-                removed["groups"] += 1
-            except Exception:
-                pass  # 有子分组或资产占用时删不掉，下一轮再说
+    # 分组只删「已经没有资产占用」的：演示资产落在 seed 阶段自动建的分组里
+    # （名字不是 DEMO_GROUP），按名字删会把它们连带拖走。
+    rows = psql("select distinct group_id from assets where group_id is not null")
+    in_use = set(r.strip() for r in rows.splitlines() if r.strip())
+    for gid in collect_group_ids(as_list(call("/api/groups", token=token))):
+        if gid in in_use:
+            continue
+        try:
+            call("/api/groups/%s" % gid, token=token, method="DELETE")
+            removed["groups"] += 1
+        except Exception:
+            pass  # 有子分组时删不掉，下一轮再说
 
     print("  清理：资产 %d、用户 %d、分组 %d" % (removed["assets"], removed["users"], removed["groups"]))
 
@@ -228,7 +248,29 @@ def ensure_demo_user(token, store):
          % (secret, DEMO_USER))
 
     store["DEMO_USERNAME"], store["DEMO_PASSWORD"], store["DEMO_TOTP_SECRET"] = DEMO_USER, pwd, secret
-    return pwd, secret
+    return psql("select id from users where username='%s' and deleted_at is null" % DEMO_USER)
+
+
+def collect_group_ids(nodes, out=None):
+    """分组接口可能返回树，递归把 id 收齐。"""
+    out = [] if out is None else out
+    for n in nodes:
+        if n.get("id"):
+            out.append(n["id"])
+        kids = n.get("children") or n.get("items") or []
+        if isinstance(kids, list):
+            collect_group_ids(kids, out)
+    return out
+
+
+def ensure_scopes(token, demo_user_id):
+    """ADMIN 只看得见授权范围内的资产，范围为空则资产列表是空的。
+    演示环境里把所有分组都授权给演示账号。"""
+    gids = collect_group_ids(as_list(call("/api/groups", token=token)))
+    call("/api/users/%s/scopes" % demo_user_id,
+         {"scopes": [{"type": "GROUP", "id": g} for g in gids]},
+         token=token, method="PUT")
+    print("  已授权 %d 个分组给 %s" % (len(gids), DEMO_USER))
 
 
 def new_install_code(token, group_id):
@@ -256,7 +298,9 @@ def main():
     print("准备分组 …")
     group_id = ensure_group(token)
     print("准备演示账号 …")
-    ensure_demo_user(token, store)
+    demo_uid = ensure_demo_user(token, store)
+    print("授权可见范围 …")
+    ensure_scopes(token, demo_uid)
     print("签发 agent 安装码 …")
     code = new_install_code(token, group_id)
 
@@ -265,8 +309,9 @@ def main():
         "DEMO_USERNAME": store["DEMO_USERNAME"],
         "DEMO_PASSWORD": store["DEMO_PASSWORD"],
         "DEMO_TOTP_SECRET": store["DEMO_TOTP_SECRET"],
+        # Agent 的 gateway 地址由 compose 从 .env 的 OPS_GATEWAY_PUBLIC_HTTP 取，
+        # 这里只放重置流程要用的安装码，不重复一份容易写歪的地址。
         "WOOPS_INSTALL_CODE": code,
-        "WOOPS_GATEWAY": "wss://%s:9200/agent" % DOMAIN,
         "DEMO_GROUP_ID": group_id,
     })
     print("\n完成。demo.env 与 .demo-secrets.env 已写入 %s" % HERE)
