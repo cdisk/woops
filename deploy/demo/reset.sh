@@ -1,86 +1,86 @@
 #!/usr/bin/env bash
-# 演示环境定时重置。由 cron 每小时整点调用（见文件末尾注释）。
+# 公开 Demo 的定时重置。由 cron 每小时整点调用，见 deploy/demo/install-cron.sh。
 #
-# 思路：只持久化 Agent 身份（asset-id / agent-token 在具名卷里），别的全可丢。
-# 所以重置不需要重新发安装码——重建容器后 Agent 用原凭据自己接回来。
-#
-#   1. 重建 Agent 容器：访客装的包、改的文件、起的进程一并消失。
-#   2. 清审计、操作记录、会话录制：既省磁盘，也不把上一位访客的操作留给下一位看。
-#   3. 清掉访客建的端口映射与部署 Token：这两个是滥用面最大的。
-#
-# 不动的东西：资产表、分组、用户、监控历史（留着让 Demo 有数据可看）。
-#
-# 用法：bash reset.sh   /   DRY_RUN=1 bash reset.sh
+# 访客拿的是 ADMIN，能删资产、改演示账号密码、建用户建分组。所以重置要能自愈：
+#   - 身份卷里的 asset-id 在库里已经没有了 → 清空该卷，用新安装码重新上线
+#   - 演示账号的密码 / 角色 / TOTP → 由 setup-demo.py 复位
+#   - 访客建的用户、分组、以及非演示资产 → 清掉
 set -euo pipefail
 
-OPS_DIR="${OPS_DIR:-/opt/ops}"
-COMPOSE=(docker compose -f docker-compose.yml -f deploy/demo/docker-compose.demo.yml
-         --env-file .env --profile full --profile desktop)
-AGENTS=(demo-agent-web01 demo-agent-web02 demo-agent-db01 demo-agent-jump01)
-DRY_RUN="${DRY_RUN:-0}"
-
+OPS_DIR=${OPS_DIR:-/opt/ops}
 cd "$OPS_DIR"
 
-run() {
-  if [ "$DRY_RUN" = "1" ]; then
-    echo "[dry-run] $*"
-  else
-    "$@"
-  fi
+COMPOSE=(docker compose -f docker-compose.yml -f deploy/demo/docker-compose.demo.yml
+         --env-file .env --profile full --profile desktop)
+PROJECT=$(basename "$OPS_DIR")
+AGENTS=(web01 web02 db01 jump01)
+
+log() { printf '[%s] %s\n' "$(date '+%F %T')" "$*"; }
+
+psql_q() {
+  docker compose --env-file .env exec -T postgres \
+    psql -U ops -d ops -tAc "$1"
 }
 
-echo "===== $(date -Is) 开始重置 ====="
+# shellcheck disable=SC1091
+source <(grep -E '^OPS_DEMO_DOMAIN=' .env)
+export OPS_DEMO_DOMAIN
 
-# ---- 1. 重建 Agent 容器（身份卷保留，容器文件系统丢弃）----
-echo "==> 重建 Agent 容器"
-run "${COMPOSE[@]}" up -d --force-recreate "${AGENTS[@]}"
+log "=== 重置开始 ==="
 
-# ---- 2. 清审计与录制 ----
-# 表名用 to_regclass 判断，不存在就跳过，避免脚本随 schema 演进而失效。
-echo "==> 清审计表"
-SQL=$(cat <<'EOSQL'
-DO $$
-DECLARE
-  t text;
-BEGIN
-  FOREACH t IN ARRAY ARRAY[
-    'server_operation_records',
-    'control_audit_events',
-    'asset_events',
-    'port_mappings',
-    'deploy_tokens'
-  ] LOOP
-    IF to_regclass(t) IS NOT NULL THEN
-      EXECUTE format('TRUNCATE TABLE %I', t);
-      RAISE NOTICE 'truncated %', t;
-    ELSE
-      RAISE NOTICE 'skip (absent) %', t;
-    END IF;
-  END LOOP;
-END $$;
-EOSQL
-)
-if [ "$DRY_RUN" = "1" ]; then
-  echo "[dry-run] psql <<< 上面的 DO 块"
-else
-  "${COMPOSE[@]}" exec -T postgres psql -U ops -d ops -v ON_ERROR_STOP=1 <<<"$SQL"
-fi
+# 1) 先停 Agent，避免它们在库被清理时反复重连。
+log "停止演示 Agent"
+for a in "${AGENTS[@]}"; do
+  "${COMPOSE[@]}" stop "demo-agent-$a" >/dev/null 2>&1 || true
+done
 
-echo "==> 清会话录制与 JSONL spool"
-# data/ops-audit 同时挂给 control-api / gateway / guacd；只删内容不删目录本身。
-run find ./data/ops-audit -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+# 2) 自愈检查：身份卷里的 asset-id 是否还在库里。
+#    访客把资产删了的话，agent-token 也跟着失效，必须清卷重新注册。
+log "校验 Agent 身份"
+KEEP_IDS=""
+for a in "${AGENTS[@]}"; do
+  vol="${PROJECT}_agent_id_${a}"
+  docker volume inspect "$vol" >/dev/null 2>&1 || continue
 
-# ---- 3. 重启 gateway，让它重新登记 spool 与端口监听 ----
-# 上一步把 spool 目录清空了，顺手重启避免它握着已删除的 .open 文件句柄。
-echo "==> 重启 gateway"
-run "${COMPOSE[@]}" restart gateway
+  asset_id=$(docker run --rm -v "$vol:/id:ro" alpine:3.20 \
+    sh -c 'cat /id/asset-id 2>/dev/null || true' | tr -d '[:space:]')
 
-echo "==> 状态"
-run "${COMPOSE[@]}" ps
+  if [ -z "$asset_id" ]; then
+    log "  $a: 尚无身份，等新安装码"
+    continue
+  fi
 
-echo "===== $(date -Is) 重置完成 ====="
+  alive=$(psql_q "select count(1) from assets where id='${asset_id}'" || echo 0)
+  if [ "$alive" = "1" ]; then
+    log "  $a: 身份有效（$asset_id）"
+    KEEP_IDS="${KEEP_IDS:+$KEEP_IDS,}${asset_id}"
+  else
+    log "  $a: 资产已被删除，清空身份卷重新注册"
+    docker run --rm -v "$vol:/id" alpine:3.20 sh -c 'rm -f /id/*' || true
+  fi
+done
 
-# 安装到 cron（每小时整点）：
-#   ( crontab -l 2>/dev/null | grep -v 'demo/reset.sh' ;
-#     echo '0 * * * * /usr/bin/flock -n /tmp/woops-demo-reset.lock bash /opt/ops/deploy/demo/reset.sh >> /var/log/woops-demo-reset.log 2>&1' 
-#   ) | crontab -
+# 3) 清录制与文件审计产物（库里的审计行由 OPS_AUDIT_RETENTION_DAYS 自己过期）。
+log "清理录制文件"
+find ./data/ops-audit -mindepth 1 -maxdepth 2 -mtime +0 -exec rm -rf {} + 2>/dev/null || true
+
+# 4) 复位演示账号（密码 / ADMIN 角色 / TOTP / totp_last_step）、清访客残留、签发新安装码。
+#    KEEP 列表 = 身份卷里仍然有效的资产，其余资产一律视为访客留下的。
+log "复位演示账号并清理残留"
+DEMO_CLEANUP=1 DEMO_KEEP_ASSET_IDS="$KEEP_IDS" python3 deploy/demo/setup-demo.py
+
+# 只取需要的那一个值，不 source 整个文件——安装码里可能有 shell 敏感字符。
+code=$(grep -E '^WOOPS_INSTALL_CODE=' deploy/demo/demo.env | cut -d= -f2-)
+export WOOPS_CODE_WEB="$code" WOOPS_CODE_DB="$code" WOOPS_CODE_JUMP="$code"
+
+# 5) 重建 Agent 容器：文件系统回到镜像初始状态，身份卷按上面的判断保留或重来。
+log "重建演示 Agent"
+for a in "${AGENTS[@]}"; do
+  "${COMPOSE[@]}" up -d --force-recreate --no-deps "demo-agent-$a"
+done
+
+# 6) broker 重新登录（密码刚被复位，缓存的 token 要换）。
+log "重启登录代理"
+"${COMPOSE[@]}" up -d --force-recreate --no-deps demo-broker
+
+log "=== 重置完成 ==="

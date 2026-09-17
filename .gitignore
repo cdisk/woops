@@ -30,6 +30,10 @@ deploy/tls/
 .env
 .env.local
 
+# 公开 Demo 主机上由 setup-demo.py 生成：演示账号口令、TOTP 密钥、安装码
+deploy/demo/demo.env
+deploy/demo/.demo-secrets.env
+
 # 本机 Agent 调试凭据（安装码下发后放置在 go/ 旁）
 go/asset-id
 go/agent-token
@@ -43,3 +47,6 @@ tmp/
 .DS_Store
 Thumbs.db
 _deploy.tgz
+# Python �ֽ���
+__pycache__/
+*.pyc

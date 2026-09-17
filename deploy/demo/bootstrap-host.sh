@@ -34,6 +34,15 @@ fi
 
 systemctl enable --now cron >/dev/null 2>&1 || true
 
+# compose 里 demo-broker 用 env_file 引它；文件不存在会直接报错，先占位。
+# 真正的内容由 deploy/demo/setup-demo.py 在全栈起来之后生成。
+DEMO_ENV="$(cd "$(dirname "$0")" && pwd)/demo.env"
+if [ ! -f "$DEMO_ENV" ]; then
+  : > "$DEMO_ENV"
+  chmod 600 "$DEMO_ENV"
+  echo "==> 已占位 $DEMO_ENV"
+fi
+
 echo "==> 版本"
 docker --version
 docker compose version

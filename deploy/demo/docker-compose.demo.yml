@@ -50,6 +50,35 @@ services:
   guacd:
     ports: !override ["127.0.0.1:4822:4822"]
 
+  # 换成带 /demo/ 反代和「一键进入演示」注入的配置。
+  console:
+    # volumes 在多文件合并时是追加的，根 compose 的 ./deploy/tls:/tls:ro 不要重列，
+    # 否则同一挂载点会重复报错。
+    volumes:
+      - ./deploy/demo/nginx.demo.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      demo-broker:
+        condition: service_started
+
+  # 一键登录代理：本地账号强制 TOTP，而 AuthService 按 `step <= last` 拒绝任何
+  # 不比上次更新的时间步——公开演示让访客自己填码，同一个 30 秒窗口里只有第一个
+  # 人能进。这里改成由服务端登录一次、把 12h 的 JWT 缓存下来给所有访客共用。
+  demo-broker:
+    profiles: ["full"]
+    build:
+      context: ./deploy/demo/broker
+    image: woops-demo-broker:${WOOPS_IMAGE_TAG}
+    env_file:
+      # 由 deploy/demo/setup-demo.py 生成（含演示账号口令与 TOTP 密钥）。
+      - ./deploy/demo/demo.env
+    environment:
+      CONTROL_API: http://control-api:9100
+      DEMO_RESET_HINT: ${DEMO_RESET_HINT:-每小时整点 / hourly}
+    depends_on:
+      control-api:
+        condition: service_started
+    restart: unless-stopped
+
   # WOOPS_CODE_* 只在「首次上线」这一次需要：Agent 注册拿到 asset-id / agent-token
   # 后就落进具名卷，之后重建容器不再读安装码。所以这几个变量平时留空即可，
   # 用 deploy/demo/seed-assets.sh 在需要时临时注入。
