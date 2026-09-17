@@ -642,6 +642,47 @@ export default {
     confirmTitle: 'Confirm'
   },
 
+  // Display names for the built-in metrics. `monitor_item_defs.name` in the DB is
+  // seed data that MetricsBootstrap never updates, so the API value cannot follow
+  // the UI language — these override it, keyed by itemId with dots turned into
+  // underscores (a dot would read as a nested path). Items missing here (metrics a
+  // user added) fall back to the name the API returns. See monitorItemLabel().
+  monitorItems: {
+    cpu_usage_percent: 'CPU usage',
+    cpu_user_percent: 'CPU user',
+    cpu_system_percent: 'CPU system',
+    cpu_idle_percent: 'CPU idle',
+    cpu_iowait_percent: 'CPU iowait',
+    cpu_count_logical: 'Logical CPUs',
+    cpu_count_physical: 'Physical CPUs',
+    cpu_mhz: 'CPU frequency',
+    load_load1: 'Load 1m',
+    load_load5: 'Load 5m',
+    load_load15: 'Load 15m',
+    mem_used_percent: 'Memory usage',
+    mem_total_bytes: 'Memory total',
+    mem_used_bytes: 'Memory used',
+    mem_available_bytes: 'Memory available',
+    swap_used_percent: 'Swap usage',
+    swap_total_bytes: 'Swap total',
+    swap_used_bytes: 'Swap used',
+    disk_used_percent: 'Disk usage',
+    disk_total_bytes: 'Disk total',
+    disk_used_bytes: 'Disk used',
+    disk_free_bytes: 'Disk free',
+    disk_inodes_used_percent: 'Inode usage',
+    diskio_read_bytes_per_sec: 'Disk read B/s',
+    diskio_write_bytes_per_sec: 'Disk write B/s',
+    net_rx_bytes_per_sec: 'Network in B/s',
+    net_tx_bytes_per_sec: 'Network out B/s',
+    net_rx_bytes: 'Network in bytes',
+    net_tx_bytes: 'Network out bytes',
+    net_rx_packets: 'Network in packets',
+    net_tx_packets: 'Network out packets',
+    host_uptime_sec: 'Uptime',
+    process_count: 'Processes'
+  },
+
   shell: {
     close: 'Close',
     ctrlWTitle: 'Browser takes Ctrl+W; click to send ^W to the terminal',

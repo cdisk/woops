@@ -35,7 +35,12 @@
         </el-form-item>
         <el-form-item :label="t('monitor.itemId')">
           <el-select v-model="form.itemId" filterable style="width:100%">
-            <el-option v-for="it in items" :key="it.itemId" :label="`${it.name} (${it.itemId})`" :value="it.itemId" />
+            <el-option
+            v-for="it in items"
+            :key="it.itemId"
+            :label="`${monitorItemLabel(it.itemId, it.name)} (${it.itemId})`"
+            :value="it.itemId"
+          />
           </el-select>
         </el-form-item>
         <el-form-item :label="t('monitor.instance')">
@@ -70,6 +75,7 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../../shared/api'
 import { canManageAlertRules } from '../../shared/auth'
+import { monitorItemLabel } from './monitorItemLabel'
 
 const { t } = useI18n()
 const loading = ref(false)

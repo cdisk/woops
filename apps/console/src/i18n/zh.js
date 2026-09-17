@@ -627,6 +627,46 @@ export default {
     confirmTitle: '确认'
   },
 
+  // 内置监控项的显示名。库里的 `monitor_item_defs.name` 是 seed 数据、
+  // MetricsBootstrap 只插不更新，跟不了界面语言，所以在这里覆盖：键为 itemId
+  // 把点换成下划线（点会被当成嵌套路径）。这里没有的（用户自建监控项）
+  // 回落到 API 返回的 name。见 monitorItemLabel()。
+  monitorItems: {
+    cpu_usage_percent: 'CPU 使用率',
+    cpu_user_percent: 'CPU User%',
+    cpu_system_percent: 'CPU System%',
+    cpu_idle_percent: 'CPU Idle%',
+    cpu_iowait_percent: 'CPU Iowait%',
+    cpu_count_logical: '逻辑 CPU 数',
+    cpu_count_physical: '物理 CPU 数',
+    cpu_mhz: 'CPU 频率',
+    load_load1: 'Load 1m',
+    load_load5: 'Load 5m',
+    load_load15: 'Load 15m',
+    mem_used_percent: '内存使用率',
+    mem_total_bytes: '内存总量',
+    mem_used_bytes: '内存已用',
+    mem_available_bytes: '内存可用',
+    swap_used_percent: 'Swap 使用率',
+    swap_total_bytes: 'Swap 总量',
+    swap_used_bytes: 'Swap 已用',
+    disk_used_percent: '磁盘占用率',
+    disk_total_bytes: '磁盘总量',
+    disk_used_bytes: '磁盘已用',
+    disk_free_bytes: '磁盘空闲',
+    disk_inodes_used_percent: 'Inode 占用率',
+    diskio_read_bytes_per_sec: '磁盘读 B/s',
+    diskio_write_bytes_per_sec: '磁盘写 B/s',
+    net_rx_bytes_per_sec: '网卡接收 B/s',
+    net_tx_bytes_per_sec: '网卡发送 B/s',
+    net_rx_bytes: '网卡接收字节',
+    net_tx_bytes: '网卡发送字节',
+    net_rx_packets: '网卡接收包',
+    net_tx_packets: '网卡发送包',
+    host_uptime_sec: '运行时长',
+    process_count: '进程数'
+  },
+
   shell: {
     close: '关闭',
     ctrlWTitle: '浏览器占用 Ctrl+W，点此向终端发送 ^W',

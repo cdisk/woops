@@ -47,7 +47,9 @@ if not DOMAIN:
     sys.exit("拿不到域名：设置 OPS_DEMO_DOMAIN，或在 %s/.env 里配好" % OPS_DIR)
 BASE = "https://%s" % DOMAIN
 DEMO_USER = os.environ.get("DEMO_USERNAME", "demo")
-DEMO_GROUP = os.environ.get("DEMO_GROUP", "Demo Servers")
+# 与 demo-tree.sh 的 DEMO_ROOT_NAME 一致：本脚本签的备用安装码挂在这棵树的根上，
+# 免得多出一个空的根分组。逐分组的安装码由 reset.sh 用 demo-tree.sh 签发。
+DEMO_GROUP = os.environ.get("DEMO_GROUP", "Demo environment")
 B32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
 
 CTX = ssl.create_default_context()

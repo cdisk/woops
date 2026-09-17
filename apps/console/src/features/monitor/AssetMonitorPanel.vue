@@ -42,7 +42,7 @@
     <div class="charts">
       <p class="brush-hint">{{ t('monitor.brushHint') }}</p>
       <div v-for="ch in chartDefs" :key="ch.itemId" class="chart-box">
-        <div class="chart-title">{{ ch.name }}</div>
+        <div class="chart-title">{{ monitorItemLabel(ch.itemId, ch.name) }}</div>
         <div :ref="(el) => setChartRef(ch.itemId, el)" class="chart"></div>
         <div class="chart-stats">
           <span>{{ t('monitor.max', { v: chartStats[ch.itemId]?.max ?? '-' }) }}</span>
@@ -87,6 +87,7 @@ import { CanvasRenderer } from 'echarts/renderers'
 import api from '../../shared/api'
 import { closeSessionTab } from '../../session/sessionWs'
 import SessionAssetTitle from '../../session/SessionAssetTitle.vue'
+import { monitorItemLabel } from './monitorItemLabel'
 
 use([LineChart, BrushComponent, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer])
 
@@ -467,7 +468,7 @@ function renderCharts() {
       const pts = seriesMap[k] || []
       const inst = k.includes('|') ? k.split('|').slice(1).join('|') : ''
       return {
-        name: inst || ch.name,
+        name: inst || monitorItemLabel(ch.itemId, ch.name),
         type: 'line',
         showSymbol: false,
         data: pts.map((p) => [p.time, p.value])

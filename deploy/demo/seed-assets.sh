@@ -23,51 +23,19 @@ AGENTS=(demo-agent-web01 demo-agent-web02 demo-agent-db01 demo-agent-jump01)
 psql_q() { "${COMPOSE[@]}" exec -T postgres psql -U ops -d ops -qtAX -v ON_ERROR_STOP=1 -c "$1"; }
 
 # ---- 1. 分组树 ----
-# 幂等：按 name 找，没有才建。sort_order 决定控制台里的排列顺序。
-# 分组名是**数据**，不走 i18n，切浏览器语言也不会变，所以公开 Demo 里一律用英文。
-ROOT_NAME='Demo environment'
-GROUPS=('Web cluster' 'Database' 'Bastion')
+# shellcheck source=deploy/demo/demo-tree.sh
+source deploy/demo/demo-tree.sh
 
 echo "==> 分组树"
-psql_q "
-INSERT INTO server_groups (id, name, parent_id, sort_order, created_at, updated_at)
-SELECT gen_random_uuid(), '$ROOT_NAME', NULL, 0, NOW(), NOW()
-WHERE NOT EXISTS (SELECT 1 FROM server_groups WHERE name = '$ROOT_NAME');
-" >/dev/null
-
-ROOT_ID=$(psql_q "SELECT id FROM server_groups WHERE name='$ROOT_NAME' LIMIT 1;")
-[ -n "$ROOT_ID" ] || { echo "ERROR: 根分组创建失败" >&2; exit 1; }
-
-i=0
-for g in "${GROUPS[@]}"; do
-  i=$((i + 1))
-  psql_q "
-  INSERT INTO server_groups (id, name, parent_id, sort_order, created_at, updated_at)
-  SELECT gen_random_uuid(), '$g', '$ROOT_ID', $i, NOW(), NOW()
-  WHERE NOT EXISTS (SELECT 1 FROM server_groups WHERE name = '$g' AND parent_id = '$ROOT_ID');
-  " >/dev/null
-done
-
-GID_WEB=$(psql_q "SELECT id FROM server_groups WHERE name='${GROUPS[0]}' AND parent_id='$ROOT_ID' LIMIT 1;")
-GID_DB=$(psql_q  "SELECT id FROM server_groups WHERE name='${GROUPS[1]}' AND parent_id='$ROOT_ID' LIMIT 1;")
-GID_JMP=$(psql_q "SELECT id FROM server_groups WHERE name='${GROUPS[2]}' AND parent_id='$ROOT_ID' LIMIT 1;")
+ensure_demo_groups
 echo "    Web=$GID_WEB  DB=$GID_DB  Jump=$GID_JMP"
 
 # ---- 2. 临时安装码 ----
-# 明文存库、16 位 hex，与 control-api 的 randomToken(8) 同格式。30 分钟够容器起来了。
+# 一个分组一个码，这样 Agent 注册就落在自己该在的分组里。30 分钟够容器起来了。
 echo "==> 临时安装码（30 分钟）"
-mint() {
-  local gid="$1" code
-  code=$(openssl rand -hex 8)
-  psql_q "
-  INSERT INTO install_codes (id, code, expires_at, revoked, used_count, group_id, created_at)
-  VALUES (gen_random_uuid(), '$code', NOW() + INTERVAL '30 minutes', false, 0, '$gid', NOW());
-  " >/dev/null
-  printf '%s' "$code"
-}
-CODE_WEB=$(mint "$GID_WEB")
-CODE_DB=$(mint "$GID_DB")
-CODE_JMP=$(mint "$GID_JMP")
+CODE_WEB=$(mint_install_code "$GID_WEB")
+CODE_DB=$(mint_install_code "$GID_DB")
+CODE_JMP=$(mint_install_code "$GID_JMP")
 
 # ---- 3. 起 Agent ----
 echo "==> 构建并启动 Agent 容器"

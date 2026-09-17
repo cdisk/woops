@@ -40,6 +40,7 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../../shared/api'
 import { formatTime } from '../../shared/format'
+import { monitorItemLabel } from './monitorItemLabel'
 
 defineProps({
   modelValue: { type: Boolean, default: false },
@@ -51,7 +52,7 @@ const { t } = useI18n()
 
 function itemLabel(row) {
   if (row.kind === 'offline' || row.itemId === 'host.online') return t('common.offline')
-  return row.itemName || row.itemId
+  return monitorItemLabel(row.itemId, row.itemName)
 }
 
 async function unignore(row) {

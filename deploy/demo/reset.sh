@@ -82,9 +82,20 @@ find ./data/ops-audit -mindepth 1 -maxdepth 2 -mtime +0 -exec rm -rf {} + 2>/dev
 log "复位演示账号并清理残留"
 DEMO_CLEANUP=1 DEMO_KEEP_ASSET_IDS="$KEEP_IDS" python3 deploy/demo/setup-demo.py
 
-# 只取需要的那一个值，不 source 整个文件——安装码里可能有 shell 敏感字符。
-code=$(grep -E '^WOOPS_INSTALL_CODE=' deploy/demo/demo.env | cut -d= -f2-)
-export WOOPS_CODE_WEB="$code" WOOPS_CODE_DB="$code" WOOPS_CODE_JUMP="$code"
+# 4.5) 一个分组一个安装码。
+#      以前这里把 setup-demo.py 签的那一个码发给全部四台，于是任何需要重新注册的
+#      Agent 都落进那个码指向的分组（Demo Servers），原分组空了又被上面的清理删掉
+#      ——分组树会一小时一小时地烂掉。docker-compose.demo.yml 本来就按
+#      WOOPS_CODE_WEB / _DB / _JUMP 分派，喂三个不同的码即可。
+#      必须在清理**之后**建树：清理会删掉当时没有资产挂着的分组。
+# shellcheck source=deploy/demo/demo-tree.sh
+source deploy/demo/demo-tree.sh
+log "确保分组树存在并签发分组安装码"
+ensure_demo_groups
+export WOOPS_CODE_WEB WOOPS_CODE_DB WOOPS_CODE_JUMP
+WOOPS_CODE_WEB=$(mint_install_code "$GID_WEB")
+WOOPS_CODE_DB=$(mint_install_code "$GID_DB")
+WOOPS_CODE_JUMP=$(mint_install_code "$GID_JMP")
 
 # 5) 重建 Agent 容器：文件系统回到镜像初始状态，身份卷按上面的判断保留或重来。
 log "重建演示 Agent"
