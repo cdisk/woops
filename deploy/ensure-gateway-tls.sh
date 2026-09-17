@@ -7,6 +7,11 @@
 #   TLS_PIN_ENV       pin env file to write (default /out/pin.env)
 #   OPS_GATEWAY_PUBLIC_HTTP / OPS_CONSOLE_PUBLIC_HTTP — used to pick DNS/IP SANs when generating
 #   OPS_TLS_EXTRA_HOSTS / OPS_TLS_EXTRA_IPS — comma-separated extra SANs
+#   OPS_TLS_TRUSTED_CA=1  cert comes from a public CA (acme.sh/Let's Encrypt): write an empty
+#                         pin so Agents validate via system CA and survive renewals, which
+#                         rotate the key and would otherwise invalidate a pinned SPKI.
+#                         Refuses to self-sign in this mode — a silent fallback would hand
+#                         Agents a cert their system CA cannot validate.
 set -eu
 
 OUT_DIR="${TLS_OUT_DIR:-/tls}"
@@ -41,6 +46,10 @@ mkdir -p "$(dirname "$PIN_ENV")"
 
 if [ -f "$CERT" ] && [ -f "$KEY" ]; then
   echo "==> TLS already present: $CERT"
+elif [ "${OPS_TLS_TRUSTED_CA:-0}" = "1" ]; then
+  echo "ERROR: OPS_TLS_TRUSTED_CA=1 but $CERT / $KEY are missing." >&2
+  echo "       Issue the cert first (e.g. acme.sh --install-cert), or unset the flag." >&2
+  exit 1
 else
   echo "==> Generating self-signed Gateway/Console TLS under $OUT_DIR"
 
@@ -133,7 +142,12 @@ else
   echo "    SAN hosts:$HOSTS  ips:$IPS"
 fi
 
-PIN=$(spki_pin_hex "$CERT")
-printf 'OPS_GATEWAY_TLS_SPKI_SHA256=%s\n' "$PIN" > "$PIN_ENV"
-echo "==> Wrote $PIN_ENV"
-echo "OPS_GATEWAY_TLS_SPKI_SHA256=$PIN"
+if [ "${OPS_TLS_TRUSTED_CA:-0}" = "1" ]; then
+  printf 'OPS_GATEWAY_TLS_SPKI_SHA256=\n' > "$PIN_ENV"
+  echo "==> Wrote $PIN_ENV (empty pin; Agents validate $CERT via system CA)"
+else
+  PIN=$(spki_pin_hex "$CERT")
+  printf 'OPS_GATEWAY_TLS_SPKI_SHA256=%s\n' "$PIN" > "$PIN_ENV"
+  echo "==> Wrote $PIN_ENV"
+  echo "OPS_GATEWAY_TLS_SPKI_SHA256=$PIN"
+fi

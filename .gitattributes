@@ -1,3 +1,10 @@
-﻿go/internal/gateway/modules/agentinstall/*.sh text eol=lf
-go/scripts/*.sh text eol=lf
-deploy/*.sh text eol=lf
+﻿# Shell 脚本一律 LF：只在 Linux / 容器里执行，CRLF 会让 sh 报
+# "set: pipefail: invalid option name" 这类莫名其妙的错。
+*.sh text eol=lf
+
+# 同理，容器内执行的入口与配置
+Dockerfile* text eol=lf
+*.yml text eol=lf
+
+# Windows legacy Agent 的安装脚本必须是 CRLF（纯 cmd 解析）
+go/internal/gateway/services/agentinstall/*.bat text eol=crlf

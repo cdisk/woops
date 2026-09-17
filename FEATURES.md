@@ -4,7 +4,7 @@
 > 任何功能新增、完成、搁置、行为变更，都必须先读本文件，并在同一变更中更新对应条目的状态与说明。  
 > README 只保留快速启动。历史设计稿 `bastion_architecture_design_*.plan.md` 不必再读。
 
-**最后更新：** 2026-09-16（发布 0.1.4：Gateway 内部路由不再上公网监听）
+**最后更新：** 2026-09-17（GitHub 镜像 + Release 产物；公开 Demo 环境；真证书部署可免 SPKI pin）
 
 ---
 
@@ -33,7 +33,7 @@
 | 控制面 | Java 唯一写 PostgreSQL；短时票据；本地管理员 break-glass（账密 **强制 TOTP**）；交互登录目标为 GitLab OAuth（GitLab 路径无堡垒侧 2FA） |
 | Agent 身份 | 安装下发：`asset-id`（= `assets.id`）+ `agent-token`；重装保留 id、刷新 token；无并行 `agentId`；清库后旧 token 失效，须用安装码重装轮换 token（`asset-id` 只标识不证明所有权） |
 | Agent 配置 | 运维配 `agent.yaml` 的 `gateway`（保留 `https://`）+ 可选 `gatewayTlsSpkiSha256`；Agent 身份凭据不进 yaml；WS 路径代码内拼接。安装脚本只写旁路一次性 `install-code` 后启动 Agent，由 Agent 经直连 / `gatewayProxy` / `proxyBridge` 自注册，原子落 `asset-id`/`agent-token` 后删除安装码 |
-| Gateway TLS | 生产 Agent 走 `wss://`；公有 CA 可省略 pin；自签名/动态 IP 用 SPKI SHA-256 pin（`OPS_GATEWAY_TLS_SPKI_SHA256`，control-api 与 Gateway 同值；安装命令/脚本/`agent.yaml` 同源）；非本机禁止明文 `ws://`；**禁止**忽略证书校验。自签名+算 pin：[`deploy/gen-gateway-tls.sh`](deploy/gen-gateway-tls.sh)；镜像 compose 另有 [`deploy/ensure-gateway-tls.sh`](deploy/ensure-gateway-tls.sh)（`tls-init` 缺证自签并写 `compose-pin.env`） |
+| Gateway TLS | 生产 Agent 走 `wss://`；公有 CA 可省略 pin；自签名/动态 IP 用 SPKI SHA-256 pin（`OPS_GATEWAY_TLS_SPKI_SHA256`，control-api 与 Gateway 同值；安装命令/脚本/`agent.yaml` 同源）；非本机禁止明文 `ws://`；**禁止**忽略证书校验。自签名+算 pin：[`deploy/gen-gateway-tls.sh`](deploy/gen-gateway-tls.sh)；镜像 compose 另有 [`deploy/ensure-gateway-tls.sh`](deploy/ensure-gateway-tls.sh)（`tls-init` 缺证自签并写 `compose-pin.env`）。**公有 CA 部署置 `OPS_TLS_TRUSTED_CA=1`**：`tls-init` 改写**空 pin**，Agent 走系统 CA，acme.sh 续期即使换私钥也不会让已上线 Agent 掉线；该模式下缺证书直接报错，不再静默自签 |
 | 本地端口 | **9100** = control-api（REST）；Gateway **9200 PUBLIC**（https/wss）+ **9201 INTERNAL**（http）；Compose 下 Gateway **host 网络**直绑；Console Docker **443**。生产可用 Nginx 终止 TLS 后反代。**公网只放 443 + 9200**（正向 portmap 另放 20000–21000）；9100/9201/5432/4822 靠服务器防火墙/安全组，**不**在 compose 里绑 `127.0.0.1`（Gateway host 网需要宿主机环回映射；**9201 绑环回会断** console→`host.docker.internal`）。Console nginx 已 404 `/api/internal`、`/api/sessions/internal`、`/api/opsctl` |
 | URL 变量 | 模板 [`.env.example`](.env.example)（中文注释）；本机复制为 `.env`（**gitignore，勿提交**），`scripts/load-env.ps1` 先加载 `.env`，再叠加 `.env.local`。**PUBLIC** / **INTERNAL** 见该文件。Compose full：Gateway host 网 → `OPS_CONTROL_INTERNAL_HTTP=http://127.0.0.1:9100`、bridge 服务经 `host.docker.internal:9201` 调 Gateway |
 | woopsctl / 部署 Token | 对外二进制名 **`woopsctl`**，内部包/API/配置契约保留 `opsctl` 命名；**资产级**一机多 Token（`ops_<tokenId>_<secret>`）；可选 `expiresAt`（空=无限期）+ 可选备注；scope 五项独立：`upload` / `download` / `exec` / `forward` / `reverse`（后两者对应临时端口映射，默认不授权）；可见资产即可管理；仅 `OPSCTL_CONFIG` JSON（`server`+`token`+`pin`，创建时展示一次）；`server` 为 Gateway **https** 基址；通道：Gateway 反代换票 + filetransfer/exec/临时 portmap WS；旧 `OPSCTL_SERVER`/`OPSCTL_TOKEN` 已移除 |
@@ -48,6 +48,7 @@
 | `[x]` | Monorepo 骨架 | `apps/console`、`apps/control-api`、`go/{gateway,agent}`、`go/cmd/woopsctl`、`go/internal/opsctl`、`deploy/`；环境变量 `.env.example` → 本机 `.env`（不入库）+ README 编译/启动；许可证 Apache-2.0 |
 | `[x]` | PostgreSQL + TimescaleDB | Compose 用 **`timescale/timescaledb:2.29.2-pg16`**（监控依赖扩展；`command` 设 `shared_preload_libraries=timescaledb`）；Java 唯一写库；**不用 H2**。默认账密 `ops`/`ops`（生产务必改）；compose 映射宿主 `:5432` 给本机工具，公网靠防火墙关掉。**control-api 启动**幂等执行 `CREATE EXTENSION` / `create_hypertable` / 压缩策略（`MetricsTimescaleBootstrap`，打进 control-api 镜像） |
 | `[x]` | docker-compose 全栈 | **拉镜像**：根目录 [`docker-compose.yml`](docker-compose.yml) → Hub `cdisk/woops-{console,control-api,gateway}`（默认标签 `WOOPS_IMAGE_TAG=0.1.4`）；README §A 快速启动；**`tls-init`**：无 `deploy/tls/gateway.*` 时按 PUBLIC URL 自签，并刷新 [`deploy/compose-pin.env`](deploy/compose-pin.env)（SPKI，供 control-api/gateway）。**源码构建**：[`deploy/docker-compose.yml`](deploy/docker-compose.yml)。`deploy/env.prod.example`；服务器 `/opt/ops`（**10.255.17.30**）；profiles `full`+`desktop`；**Gateway `network_mode: host`**；TLS 挂 `deploy/tls`（gitignore）；`Dockerfile.control-api` 用阿里云 Maven + BuildKit `/root/.m2` 缓存。full 另映射 control-api `:9100`、guacd `:4822`（公网靠防火墙）。**「重新部署」**：见 `.cursor/rules/redeploy.mdc`（17.30 源码构建 + Hub 推送 `$ver`/`latest` + 升 compose 默认标签） |
+| `[x]` | 公开 Demo 环境 | [`deploy/demo/`](deploy/demo/)：`bootstrap-host.sh`（Docker / socat / acme.sh）、`make-env.sh`（随机密钥 + 真证书 `.env`）、`issue-cert.sh`（acme.sh standalone 签到 `deploy/tls/gateway.*`，`--reloadcmd` 续期后重启 console/gateway）、`docker-compose.demo.yml`（`!override []` 撤掉根 compose 发布的 5432/9100/4822；起容器化 Agent 当演示资产，身份文件落具名卷、容器文件系统一次性）、`Dockerfile.agent` + `entrypoint-agent.sh`（Agent 二进制取自 gateway 镜像；不写 pin，走系统 CA）、`firewall.sh`（只放 22/80/443/9200；DOCKER-USER 丢弃 Agent 子网 FORWARD 掐断出网）、`reset.sh`（定时重建容器 + 清审计/录制）。域名 `woops-demo.tool4dev.net` |
 | `[x]` | guacd sidecar | `deploy/docker-compose.yml` → `guacamole/guacd:1.5.5`（发布宿主 `:4822`）；Gateway `OPS_GUACD_ADDR=127.0.0.1:4822`、`OPS_GUAC_BRIDGE_HOST=host.docker.internal`；console/control-api/guacd 配 `extra_hosts: host.docker.internal:host-gateway` |
 | `[x]` | `data/ops-audit/` 卷 | 运行态 JSONL **与会话录像**的本地根目录；`OPS_AUDIT_DIR`（默认 `./data/ops-audit`；Compose `/data/ops-audit` 同时挂 control-api / gateway / guacd）；已 gitignore |
 | `[ ]` | `openapi/` 契约 | Java REST → Vue TS client |

@@ -1,0 +1,54 @@
+# 演示用「被管主机」。二进制直接取自 gateway 镜像，保证和 Gateway 同版本。
+ARG WOOPS_IMAGE_TAG=0.1.4
+FROM cdisk/woops-gateway:${WOOPS_IMAGE_TAG} AS bin
+
+FROM debian:12-slim
+
+# 让 Shell 演示有东西可用。运行时出网是封的，所以工具必须在构建期装好。
+RUN apt-get update -qq \
+    && apt-get install -y -qq --no-install-recommends \
+        procps less vim-tiny nano htop tree file net-tools iproute2 \
+        ca-certificates locales bash-completion \
+    && sed -i 's/^# *en_US.UTF-8/en_US.UTF-8/' /etc/locale.gen && locale-gen en_US.UTF-8 \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV LANG=en_US.UTF-8 TERM=xterm-256color
+
+COPY --from=bin /app/bin/woops-agent-linux-amd64 /usr/local/bin/woops-agent
+RUN chmod +x /usr/local/bin/woops-agent
+
+# 一点像样的内容，好让文件管理和 Shell 看起来不是空盒子。
+RUN set -eux; \
+    mkdir -p /srv/app/{config,releases,static} /srv/backup /var/log/demo-app; \
+    printf '%s\n' \
+      'server {' \
+      '    listen 8080;' \
+      '    server_name demo.internal;' \
+      '    root /srv/app/static;' \
+      '    access_log /var/log/demo-app/access.log;' \
+      '}' > /srv/app/config/site.conf; \
+    printf '%s\n' \
+      '# 演示环境说明' \
+      '' \
+      '这台主机是 Woops 演示环境里的一个容器，不是真实服务器。' \
+      '欢迎随意执行命令、改文件、上传下载。' \
+      '' \
+      '环境每小时整点自动重置，你做的改动会被清空。' \
+      '' \
+      'This host is a throwaway container in the Woops demo.' \
+      'Feel free to poke around — it resets every hour.' \
+      > /srv/app/README.md; \
+    for i in 1 2 3; do \
+      printf 'release-0.%s.0\n' "$i" > "/srv/app/releases/0.$i.0.txt"; \
+    done; \
+    head -c 200000 /dev/urandom | base64 > /srv/app/static/bundle.js; \
+    for d in 1 2 3 4 5; do \
+      printf '10.0.0.%s - - [%sT08:%s:00Z] "GET / HTTP/1.1" 200 1024\n' "$d" "2026-09-1$d" "0$d" \
+        >> /var/log/demo-app/access.log; \
+    done
+
+COPY entrypoint-agent.sh /usr/local/bin/entrypoint-agent.sh
+RUN chmod +x /usr/local/bin/entrypoint-agent.sh
+
+WORKDIR /root
+ENTRYPOINT ["/usr/local/bin/entrypoint-agent.sh"]

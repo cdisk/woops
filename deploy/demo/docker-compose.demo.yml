@@ -1,0 +1,92 @@
+# 演示环境叠加层。与根 docker-compose.yml 一起用：
+#   docker compose -f docker-compose.yml -f deploy/demo/docker-compose.demo.yml \
+#     --env-file .env --profile full --profile desktop up -d
+#
+# 做两件事：
+#   1. 撤掉根 compose 对外发布的 5432 / 9100 / 4822（根 compose 为本机调试方便而发布，
+#      公网演示环境不能留；Postgres 账密在根 compose 里是硬编码的 ops/ops）。
+#   2. 起若干容器化 Agent 当演示资产。容器文件系统是一次性的，只有身份文件落在
+#      具名卷里，所以定时重置只需重建容器，不用重新发安装码。
+#
+# Agent 出网限制见 deploy/demo/firewall.sh：demo-agents 子网的 FORWARD 全丢，
+# 只留「容器 → 宿主机」这条（走 INPUT，不经 FORWARD），够它连 Gateway 9200。
+
+x-demo-agent: &demo-agent
+  build:
+    context: .
+    dockerfile: Dockerfile.agent
+  image: woops-demo-agent:local
+  environment:
+    WOOPS_GATEWAY: ${OPS_GATEWAY_PUBLIC_HTTP}
+  # 让 Agent 用真实域名连 Gateway（证书 SAN 要匹配），但解析到宿主机，
+  # 不绕公网一圈，省掉对 VPS hairpin NAT 的依赖。
+  extra_hosts:
+    - "${OPS_DEMO_DOMAIN}:host-gateway"
+  networks:
+    - demo-agents
+  restart: unless-stopped
+
+services:
+  postgres:
+    ports: !override []
+
+  control-api:
+    ports: !override []
+
+  guacd:
+    ports: !override []
+
+  demo-agent-web01:
+    <<: *demo-agent
+    hostname: web-01
+    container_name: woops-demo-web01
+    environment:
+      WOOPS_GATEWAY: ${OPS_GATEWAY_PUBLIC_HTTP}
+      WOOPS_DEMO_ROLE: web
+    volumes:
+      - agent_id_web01:/etc/woops-agent
+
+  demo-agent-web02:
+    <<: *demo-agent
+    hostname: web-02
+    container_name: woops-demo-web02
+    environment:
+      WOOPS_GATEWAY: ${OPS_GATEWAY_PUBLIC_HTTP}
+      WOOPS_DEMO_ROLE: web
+    volumes:
+      - agent_id_web02:/etc/woops-agent
+
+  demo-agent-db01:
+    <<: *demo-agent
+    hostname: db-01
+    container_name: woops-demo-db01
+    environment:
+      WOOPS_GATEWAY: ${OPS_GATEWAY_PUBLIC_HTTP}
+      WOOPS_DEMO_ROLE: db
+    volumes:
+      - agent_id_db01:/etc/woops-agent
+
+  demo-agent-jump01:
+    <<: *demo-agent
+    hostname: jump-01
+    container_name: woops-demo-jump01
+    environment:
+      WOOPS_GATEWAY: ${OPS_GATEWAY_PUBLIC_HTTP}
+      WOOPS_DEMO_ROLE: jump
+    volumes:
+      - agent_id_jump01:/etc/woops-agent
+
+networks:
+  # 固定子网，好让 firewall.sh 精确匹配。
+  demo-agents:
+    name: woops-demo-agents
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.31.66.0/24
+
+volumes:
+  agent_id_web01:
+  agent_id_web02:
+  agent_id_db01:
+  agent_id_jump01:
