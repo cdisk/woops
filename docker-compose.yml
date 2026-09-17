@@ -4,7 +4,7 @@
 # 前置：仓库根目录 .env（从 .env.example 复制）。deploy/tls 无证书时 tls-init 会自签并写入 compose-pin.env。
 # 启动：docker compose --env-file .env --profile full --profile desktop up -d
 #
-# 镜像标签可用环境变量覆盖：WOOPS_IMAGE_TAG=0.1.4（默认）或 latest
+# 镜像标签可用环境变量覆盖：WOOPS_IMAGE_TAG=0.1.5（默认）或 latest
 services:
   postgres:
     image: timescale/timescaledb:2.29.2-pg16
@@ -41,7 +41,7 @@ services:
 
   control-api:
     profiles: ["full"]
-    image: cdisk/woops-control-api:${WOOPS_IMAGE_TAG:-0.1.4}
+    image: cdisk/woops-control-api:${WOOPS_IMAGE_TAG:-0.1.5}
     depends_on:
       postgres:
         condition: service_healthy
@@ -66,7 +66,7 @@ services:
 
   gateway:
     profiles: ["full"]
-    image: cdisk/woops-gateway:${WOOPS_IMAGE_TAG:-0.1.4}
+    image: cdisk/woops-gateway:${WOOPS_IMAGE_TAG:-0.1.5}
     depends_on:
       tls-init:
         condition: service_completed_successfully
@@ -91,7 +91,7 @@ services:
 
   console:
     profiles: ["full"]
-    image: cdisk/woops-console:${WOOPS_IMAGE_TAG:-0.1.4}
+    image: cdisk/woops-console:${WOOPS_IMAGE_TAG:-0.1.5}
     depends_on:
       tls-init:
         condition: service_completed_successfully

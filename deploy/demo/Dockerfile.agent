@@ -1,5 +1,5 @@
 # 演示用「被管主机」。二进制直接取自 gateway 镜像，保证和 Gateway 同版本。
-ARG WOOPS_IMAGE_TAG=0.1.4
+ARG WOOPS_IMAGE_TAG=0.1.5
 FROM cdisk/woops-gateway:${WOOPS_IMAGE_TAG} AS bin
 
 FROM debian:12-slim
