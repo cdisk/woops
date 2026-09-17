@@ -1,0 +1,86 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build and publish'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  binaries:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          cache-dependency-path: go/go.sum
+
+      # Agent version keeps the project's yymmddHHmm scheme (see FEATURES.md §3),
+      # because the console compares this string to detect a completed update.
+      - name: Resolve version
+        id: v
+        run: |
+          echo "agent=$(date -u +%y%m%d%H%M)" >> "$GITHUB_OUTPUT"
+          echo "tag=${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}" >> "$GITHUB_OUTPUT"
+
+      - name: Build gateway and woopsctl
+        working-directory: go
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          mkdir -p dist
+          for target in linux/amd64 linux/arm64 windows/amd64; do
+            os=${target%/*}; arch=${target#*/}
+            ext=''; [ "$os" = windows ] && ext='.exe'
+            for cmd in gateway woopsctl; do
+              GOOS=$os GOARCH=$arch go build -trimpath -ldflags='-s -w' \
+                -o "dist/${cmd}-${os}-${arch}${ext}" "./cmd/${cmd}"
+            done
+          done
+
+      # Windows 7 and Server 2012 cannot run binaries from Go 1.21+, so the
+      # Windows agent is pinned to the last toolchain that still supports them.
+      - name: Build agents
+        working-directory: go
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          ldflags="-s -w -X main.Version=${{ steps.v.outputs.agent }}"
+          for arch in amd64 arm64; do
+            GOOS=linux GOARCH=$arch go build -trimpath -ldflags="$ldflags" \
+              -o "dist/woops-agent-linux-${arch}" ./cmd/agent
+          done
+          GOTOOLCHAIN=go1.20.14 GOOS=windows GOARCH=amd64 go build -trimpath \
+            -ldflags="$ldflags" -o dist/woops-agent-windows-amd64.exe ./cmd/agent
+          for f in dist/woops-agent-*; do gzip -9 -k "$f"; done
+
+      - name: Checksums
+        working-directory: go/dist
+        run: sha256sum * > SHA256SUMS.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.v.outputs.tag }}
+          files: go/dist/*
+          generate_release_notes: true
+          body: |
+            Container images for this release are on Docker Hub:
+            [`cdisk/woops-console`](https://hub.docker.com/r/cdisk/woops-console),
+            [`cdisk/woops-control-api`](https://hub.docker.com/r/cdisk/woops-control-api),
+            [`cdisk/woops-gateway`](https://hub.docker.com/r/cdisk/woops-gateway).
+
+            To deploy, you only need the compose file and `.env.example` from the
+            source archive — see the quick start in the README. The binaries below
+            are for air-gapped and manual agent installs
+            (`docs/agent-manual-install.md`), and for running `woopsctl` in CI.
+
+            Agent binaries in this release report version `${{ steps.v.outputs.agent }}`.
