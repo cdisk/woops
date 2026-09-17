@@ -7,6 +7,12 @@ Shell · 文件 · RDP/VNC · 端口映射 · 轻量监控 · 审计回放 · Gi
 
 功能与架构约定见 [`FEATURES.md`](./FEATURES.md)。许可证：[Apache License 2.0](./LICENSE)。
 
+## ▶ 在线演示
+
+**[woops-demo.tool4dev.net](https://woops-demo.tool4dev.net/demo/)** — 免注册、免密码，点一下按钮直接进控制台。
+
+进去就是管理员，四台一次性 Linux 主机已经在线：开 Shell、管文件、改端口映射、看监控曲线、再从审计日志里回放自己刚才的会话。环境整点自动重置，随便折腾；但账号是所有人共用的，**别上传真实数据或密钥**。
+
 ## 和 JumpServer / Teleport 的差别（一句话）
 
 | | 传统堡垒（如 JumpServer） | Woops |

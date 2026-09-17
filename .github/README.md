@@ -4,10 +4,19 @@
 
 Shell, file transfer, RDP/VNC, port forwarding, lightweight monitoring, session recording and CI (`woopsctl`) all ride the *same* outbound agent channel.
 
+[![Live demo](https://img.shields.io/badge/live%20demo-try%20it%20now-2F5D9F.svg)](https://woops-demo.tool4dev.net/demo/)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](../LICENSE)
 [![Docker](https://img.shields.io/badge/docker-cdisk%2Fwoops-2496ed.svg)](https://hub.docker.com/r/cdisk/woops-console)
 
 [中文文档](../README.md) · [Feature list & architecture](../FEATURES.md)
+
+---
+
+## ▶ Try the live demo
+
+**[woops-demo.tool4dev.net](https://woops-demo.tool4dev.net/demo/)** — one click, no signup, no credentials.
+
+You land in the console as an admin with four throwaway Linux hosts already online: open a shell, browse and edit files, forward a port, watch the metrics, replay your own session from the audit log. Everything resets on the hour, so feel free to break things — but the account is shared, so don't upload anything real.
 
 ---
 
