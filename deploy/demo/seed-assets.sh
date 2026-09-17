@@ -24,18 +24,22 @@ psql_q() { "${COMPOSE[@]}" exec -T postgres psql -U ops -d ops -qtAX -v ON_ERROR
 
 # ---- 1. 分组树 ----
 # 幂等：按 name 找，没有才建。sort_order 决定控制台里的排列顺序。
+# 分组名是**数据**，不走 i18n，切浏览器语言也不会变，所以公开 Demo 里一律用英文。
+ROOT_NAME='Demo environment'
+GROUPS=('Web cluster' 'Database' 'Bastion')
+
 echo "==> 分组树"
 psql_q "
 INSERT INTO server_groups (id, name, parent_id, sort_order, created_at, updated_at)
-SELECT gen_random_uuid(), '演示环境', NULL, 0, NOW(), NOW()
-WHERE NOT EXISTS (SELECT 1 FROM server_groups WHERE name = '演示环境');
+SELECT gen_random_uuid(), '$ROOT_NAME', NULL, 0, NOW(), NOW()
+WHERE NOT EXISTS (SELECT 1 FROM server_groups WHERE name = '$ROOT_NAME');
 " >/dev/null
 
-ROOT_ID=$(psql_q "SELECT id FROM server_groups WHERE name='演示环境' LIMIT 1;")
+ROOT_ID=$(psql_q "SELECT id FROM server_groups WHERE name='$ROOT_NAME' LIMIT 1;")
 [ -n "$ROOT_ID" ] || { echo "ERROR: 根分组创建失败" >&2; exit 1; }
 
 i=0
-for g in "Web 集群" "数据库" "跳板机"; do
+for g in "${GROUPS[@]}"; do
   i=$((i + 1))
   psql_q "
   INSERT INTO server_groups (id, name, parent_id, sort_order, created_at, updated_at)
@@ -44,9 +48,9 @@ for g in "Web 集群" "数据库" "跳板机"; do
   " >/dev/null
 done
 
-GID_WEB=$(psql_q "SELECT id FROM server_groups WHERE name='Web 集群'  AND parent_id='$ROOT_ID' LIMIT 1;")
-GID_DB=$(psql_q  "SELECT id FROM server_groups WHERE name='数据库'    AND parent_id='$ROOT_ID' LIMIT 1;")
-GID_JMP=$(psql_q "SELECT id FROM server_groups WHERE name='跳板机'    AND parent_id='$ROOT_ID' LIMIT 1;")
+GID_WEB=$(psql_q "SELECT id FROM server_groups WHERE name='${GROUPS[0]}' AND parent_id='$ROOT_ID' LIMIT 1;")
+GID_DB=$(psql_q  "SELECT id FROM server_groups WHERE name='${GROUPS[1]}' AND parent_id='$ROOT_ID' LIMIT 1;")
+GID_JMP=$(psql_q "SELECT id FROM server_groups WHERE name='${GROUPS[2]}' AND parent_id='$ROOT_ID' LIMIT 1;")
 echo "    Web=$GID_WEB  DB=$GID_DB  Jump=$GID_JMP"
 
 # ---- 2. 临时安装码 ----

@@ -65,10 +65,13 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
-import apiDocMd from './apiTokenDoc.md?raw'
+import apiDocZh from './apiTokenDoc.md?raw'
+import apiDocEn from './apiTokenDoc.en.md?raw'
 import { renderApiDoc } from './renderApiDocMd'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
+// The body is prose, not i18n keys, so it lives in one Markdown file per locale.
+const apiDocMd = computed(() => (String(locale.value).startsWith('zh') ? apiDocZh : apiDocEn))
 const DOC_PLACEHOLDER_BASE = 'https://ops.example.com'
 const API_BASE_TOKEN = '{{API_REQUEST_PREFIX}}'
 
@@ -92,7 +95,7 @@ function resolveApiBase() {
 
 const apiBase = ref(resolveApiBase())
 // The placeholder is represented by the interactive base bar above.
-const previewMd = computed(() => apiDocMd.replace(API_BASE_TOKEN, ''))
+const previewMd = computed(() => apiDocMd.value.replace(API_BASE_TOKEN, ''))
 const rendered = computed(() => renderApiDoc(previewMd.value))
 const html = computed(() => rendered.value.html)
 const toc = computed(() => rendered.value.toc.filter((x) => x.level >= 2))
@@ -184,8 +187,9 @@ function onScrollOrResize() {
 
 function mdWithBase() {
   const base = apiBase.value || DOC_PLACEHOLDER_BASE
-  const baseBlock = `**${t('profile.apiBaseLabel')}：** \`${base}\``
-  return apiDocMd
+  const colon = String(locale.value).startsWith('zh') ? '：' : ': '
+  const baseBlock = `**${t('profile.apiBaseLabel')}${colon}** \`${base}\``
+  return apiDocMd.value
     .replace(API_BASE_TOKEN, baseBlock)
     .split(DOC_PLACEHOLDER_BASE)
     .join(base)

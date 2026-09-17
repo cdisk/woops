@@ -9,7 +9,7 @@ set -euo pipefail
 DOMAIN="${DOMAIN:?需要 DOMAIN}"
 OPS_DIR="${OPS_DIR:-/opt/ops}"
 ENV_FILE="$OPS_DIR/.env"
-TAG="${WOOPS_IMAGE_TAG:-0.1.6}"
+TAG="${WOOPS_IMAGE_TAG:-0.1.7}"
 
 if [ -f "$ENV_FILE" ] && [ "${FORCE:-0}" != "1" ]; then
   echo "==> $ENV_FILE 已存在，跳过（FORCE=1 可重写）"

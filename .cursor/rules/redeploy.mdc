@@ -7,6 +7,14 @@ alwaysApply: true
 
 用户说 **「重新部署」** / **「部署一下」**（发布本次改动，而非仅本机 Vite）时，默认执行完整发布，不要只更新 17.30。
 
+## 先读 `NOTES.local.md`
+
+共有**三套环境**（公司源码构建 / 个人 Hub 镜像 / 公开演示），各自的 compose 文件、project 名、`--env-file` 路径、TLS 方式、SSH 方式**都不一样**，照抄一套的命令到另一套会失败。清单与逐套步骤在仓库根目录 [`NOTES.local.md`](../../NOTES.local.md)。
+
+该文件在 `.gitignore` 里：本仓库公开镜像到 GitHub / Gitee，**主机地址、SSH 端口、SPKI 指纹一律不要写进本规则或任何受版本控制的文件**。
+
+两条最容易踩的：个人环境动 gateway 前必须核对 SPKI（自签 + Agent 侧 pin，证书换了 Agent 全掉线）；演示环境的 compose 必须同时带 `-f docker-compose.yml -f deploy/demo/docker-compose.demo.yml`，少一个会把 postgres/control-api/guacd 的端口暴露到公网。
+
 ## 目标
 
 1. **生产源码机** `root@10.255.17.30`：`/opt/ops`，用 `deploy/docker-compose.yml` **源码构建**重启受影响服务。
