@@ -1,4 +1,4 @@
-﻿# Shell 脚本一律 LF：只在 Linux / 容器里执行，CRLF 会让 sh 报
+# Shell 脚本一律 LF：只在 Linux / 容器里执行，CRLF 会让 sh 报
 # "set: pipefail: invalid option name" 这类莫名其妙的错。
 *.sh text eol=lf
 
