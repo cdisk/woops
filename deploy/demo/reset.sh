@@ -34,12 +34,17 @@ log "=== 重置开始 ==="
 #    而失败。故每次重置先扫一遍，让碰撞只坏一个小时。
 log "清理重建残壳"
 #    两种命名都要管：compose 默认名 <project>-<svc>-1，以及 Agent 的 container_name。
-docker ps -a --format '{{.Names}}' \
-  | grep -E "^[0-9a-f]{12}_(${PROJECT}-[a-z-]+-[0-9]+|woops-demo-[a-z0-9]+)$" \
-  | while read -r stale; do
-      log "  删除残壳 $stale"
-      docker rm -f "$stale" >/dev/null 2>&1 || true
-    done
+#    grep 无匹配时返回 1，而「没有残壳」正是常态；套在 pipefail 的管道里会
+#    连带 set -e 把整个重置掐死在这一步（静默不重置，日志只剩这一行）。
+mapfile -t stale_shells < <(
+  docker ps -a --format '{{.Names}}' \
+    | grep -E "^[0-9a-f]{12}_(${PROJECT}-[a-z-]+-[0-9]+|woops-demo-[a-z0-9]+)$" || true
+)
+for stale in "${stale_shells[@]}"; do
+  [ -n "$stale" ] || continue
+  log "  删除残壳 $stale"
+  docker rm -f "$stale" >/dev/null 2>&1 || true
+done
 
 # 1) 先停 Agent，避免它们在库被清理时反复重连。
 log "停止演示 Agent"
