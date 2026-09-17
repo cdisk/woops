@@ -15,7 +15,13 @@ import java.sql.Statement;
 
 /**
  * Builds the time-range-first series index in the background so startup and the
- * Hikari pool stay responsive while PostgreSQL creates the index concurrently.
+ * Hikari pool stay responsive while the index is created.
+ * <p>
+ * TimescaleDB rejects {@code CREATE INDEX CONCURRENTLY} on a hypertable
+ * ("hypertables do not support concurrent index creation"), so once
+ * {@code monitor_history} has been converted, the index is built one chunk per
+ * transaction instead. Plain Postgres tables (Timescale unavailable, or the
+ * conversion has not run yet) keep the concurrent path.
  */
 @Component
 @Order(60)
@@ -50,28 +56,47 @@ public class MetricsIndexMigrator implements ApplicationRunner {
                 return;
             }
             try {
+                // MetricsTimescaleBootstrap converts the table in its own background
+                // thread; if it wins the race right after this check, the build fails
+                // and the next start (table already a hypertable) gets it right.
+                boolean hypertable = isHypertable(conn, TABLE_NAME);
                 Boolean valid = indexValid(conn);
                 if (Boolean.TRUE.equals(valid)) {
                     return;
                 }
                 if (Boolean.FALSE.equals(valid)) {
-                    // Concurrent create left an invalid index; drop and rebuild.
-                    try (Statement st = conn.createStatement()) {
-                        st.execute("DROP INDEX CONCURRENTLY IF EXISTS " + INDEX_NAME);
-                    }
+                    // A failed create left an invalid index; drop and rebuild.
+                    dropIndex(conn, hypertable);
                 }
-                log.info("Building monitor series index concurrently in background");
-                try (Statement st = conn.createStatement()) {
-                    st.execute(
-                            "CREATE INDEX CONCURRENTLY IF NOT EXISTS " + INDEX_NAME
-                                    + " ON " + TABLE_NAME + " (asset_id, item_id, time, instance)");
-                }
+                buildIndex(conn, hypertable);
                 log.info("Monitor series index is ready");
             } finally {
                 unlock(conn);
             }
         } catch (Exception e) {
             log.warn("Monitor series index migration failed; queries may be slower until fixed: {}", e.toString());
+        }
+    }
+
+    /**
+     * TimescaleDB rejects CONCURRENTLY on a hypertable and builds the index one
+     * chunk per transaction instead, which needs autocommit just the same.
+     */
+    private static void buildIndex(Connection conn, boolean hypertable) throws Exception {
+        log.info("Building monitor series index in background ({})",
+                hypertable ? "one transaction per chunk" : "concurrently");
+        try (Statement st = conn.createStatement()) {
+            st.execute(
+                    "CREATE INDEX " + (hypertable ? "" : "CONCURRENTLY ")
+                            + "IF NOT EXISTS " + INDEX_NAME
+                            + " ON " + TABLE_NAME + " (asset_id, item_id, time, instance)"
+                            + (hypertable ? " WITH (timescaledb.transaction_per_chunk)" : ""));
+        }
+    }
+
+    private static void dropIndex(Connection conn, boolean hypertable) throws Exception {
+        try (Statement st = conn.createStatement()) {
+            st.execute("DROP INDEX " + (hypertable ? "" : "CONCURRENTLY ") + "IF EXISTS " + INDEX_NAME);
         }
     }
 
@@ -85,6 +110,22 @@ public class MetricsIndexMigrator implements ApplicationRunner {
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next();
             }
+        }
+    }
+
+    private static boolean isHypertable(Connection conn, String table) throws Exception {
+        try (PreparedStatement ps = conn.prepareStatement(
+                """
+                SELECT 1 FROM timescaledb_information.hypertables
+                WHERE hypertable_schema = current_schema() AND hypertable_name = ?
+                """)) {
+            ps.setString(1, table);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        } catch (Exception e) {
+            // No timescaledb extension: the view does not exist, so it is a plain table.
+            return false;
         }
     }
 
