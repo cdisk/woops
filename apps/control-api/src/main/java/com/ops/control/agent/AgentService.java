@@ -444,10 +444,10 @@ public class AgentService {
     }
 
     /**
-     * Console one-liner: download the agent binary (TLS pin on the binary itself), then run
+     * Console one-liner: download the agent binary (TLS pin on the download itself), then run
      * {@code woops-agent install}. Architecture is probed inline so amd64/arm64 share one command.
-     * With pin: prefer {@code -k --pinnedpubkey}; CentOS 6 / curl &lt; 7.39 lack that flag, so the
-     * command falls back to {@code -k} only after detecting support (still better than failing).
+     * With pin: {@code -k --pinnedpubkey} (same as Windows). Old curl without that flag (e.g.
+     * CentOS 6) needs the operator to drop {@code --pinnedpubkey} manually.
      */
     static String buildLinuxInstallCurl(String gatewayBase, String code, String pinHex) {
         String url = gatewayBase + "/i/" + code
@@ -457,13 +457,8 @@ public class AgentService {
             download = "curl -fsSL --compressed -o /tmp/woops-agent \"" + url + "\"";
         } else {
             String pinned = "sha256//" + Base64.getEncoder().encodeToString(HexFormat.of().parseHex(pinHex));
-            // Old curl (CentOS 6) rejects unknown --pinnedpubkey before any transfer.
-            download = "if curl --help 2>&1 | grep -q -- '--pinnedpubkey'; then "
-                    + "curl -fsSL -k --pinnedpubkey " + pinned + " --compressed -o /tmp/woops-agent \"" + url + "\"; "
-                    + "else "
-                    + "echo '==> WARNING: curl has no --pinnedpubkey (need curl>=7.39); downloading with -k only'; "
-                    + "curl -fsSL -k --compressed -o /tmp/woops-agent \"" + url + "\"; "
-                    + "fi";
+            download = "curl -fsSL -k --pinnedpubkey " + pinned
+                    + " --compressed -o /tmp/woops-agent \"" + url + "\"";
         }
         return download + " && chmod +x /tmp/woops-agent && /tmp/woops-agent " + installArgs(gatewayBase, code, pinHex);
     }

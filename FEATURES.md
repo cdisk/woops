@@ -4,7 +4,7 @@
 > 任何功能新增、完成、搁置、行为变更，都必须先读本文件，并在同一变更中更新对应条目的状态与说明。  
 > README 只保留快速启动。历史设计稿 `bastion_architecture_design_*.plan.md` 不必再读。
 
-**最后更新：** 2026-09-18（CentOS 6/SysV + 排除安装进程误判 live；`woops-agent install`/`uninstall` 子命令成为主安装路径，控制台一行命令改为 curl 二进制；Windows 重装/换 Gateway 热修；资产备注；GitHub 镜像；Demo 自愈；真证书可免 pin；内网 IP/监控索引/英文 locale 等既有项）
+**最后更新：** 2026-09-18（Linux 安装命令去掉 curl `--pinnedpubkey` 探测回退；CentOS 6/SysV + 排除安装进程误判 live；`woops-agent install`/`uninstall` 主路径；Windows 重装热修；资产备注；GitHub 镜像；Demo 自愈；真证书可免 pin 等既有项）
 
 ---
 
@@ -114,7 +114,7 @@
 | `[x]` | `GET /i/{code}/install.ps1` / `install.bat` | **过渡期保留**：旧版脚本安装仍可用；新安装走 `woops-agent install`（见下） |
 | `[x]` | `GET /i/{code}/agent/{os}/{arch}` | 产物名 `woops-agent-{os}-{arch}`（`.exe`/`.gz`）；`-ldflags=-s -w -X main.Version=…`；**Content-Encoding: gzip** 协商（`curl --compressed` 透明解压）+ 旁路 `?format=gz`；**Docker Gateway** 同步编 `linux/amd64` + `linux/arm64` + `windows/amd64`；gateway/Linux/woopsctl 用当前 Go，**Windows Agent 独立固定 Go 1.20.14**（Go 1.21+ 产物不能运行于 Win7 / Server 2012） |
 | `[x]` | `GET /bin/woopsctl/{os}/{arch}` | 公开下载（无需安装码）；产物 `woopsctl-{os}-{arch}`（Windows `.exe`）；**Docker Gateway** 同编 `linux/amd64` + `linux/arm64` + `windows/amd64`；Console 部署 Token 旁弹窗展示绝对 URL 并可复制；nginx/Vite 同源 `/bin/` 反代 Gateway |
-| `[x]` | `woops-agent install` / `uninstall` | **主安装路径**（`go/internal/agent/install`）：控制台一行命令先 `curl`（带 pin + `--compressed`）下载 Agent 二进制，再 `install -gateway -code -pin`。强制刷新顶层 `gateway`/`gatewayTlsSpkiSha256`，保留 `gatewayProxy`/`proxy`/`proxyBridge`（行级合并，测 BOM/CRLF/缩进子键）；原子写 `install-code`；落地二进制并保留一代 `.old`；注册 **systemd** 或 **SysV**（`/etc/init.d/woops-agent` + chkconfig，兼容 CentOS 6）/ Windows Service（`svc/mgr`）；脱离父进程后 `-phase=restart`；冷装等注册最多 60s；**升级失败自动回滚** `.old`。`AgentLive` **排除当前安装进程 PID**（否则 `/tmp/woops-agent install` 被 `pgrep -x` 误判 live，二进制落到 `/opt` 而 StartService 去启 `/usr/local/bin`）。Linux 安装命令探测 curl 是否支持 `--pinnedpubkey`（CentOS 6 curl 7.19 无此选项则回退 `-k` 并告警）。`uninstall`（可选 `-purge`）停删服务与二进制。旧 `install.{sh,ps1,bat}` 过渡期仍嵌入 Gateway |
+| `[x]` | `woops-agent install` / `uninstall` | **主安装路径**（`go/internal/agent/install`）：控制台一行命令先 `curl`（带 pin + `--compressed`）下载 Agent 二进制，再 `install -gateway -code -pin`。强制刷新顶层 `gateway`/`gatewayTlsSpkiSha256`，保留 `gatewayProxy`/`proxy`/`proxyBridge`（行级合并，测 BOM/CRLF/缩进子键）；原子写 `install-code`；落地二进制并保留一代 `.old`；注册 **systemd** 或 **SysV**（`/etc/init.d/woops-agent` + chkconfig，兼容 CentOS 6）/ Windows Service（`svc/mgr`）；脱离父进程后 `-phase=restart`；冷装等注册最多 60s；**升级失败自动回滚** `.old`。`AgentLive` **排除当前安装进程 PID**（否则 `/tmp/woops-agent install` 被 `pgrep -x` 误判 live，二进制落到 `/opt` 而 StartService 去启 `/usr/local/bin`）。Linux 安装命令有 pin 时固定 `-k --pinnedpubkey`（与 Windows 一致；老 curl 无此选项时需手工去掉）。`uninstall`（可选 `-purge`）停删服务与二进制。旧 `install.{sh,ps1,bat}` 过渡期仍嵌入 Gateway |
 | `[x]` | install 脚本行为（遗留） | 过渡期仍服务；行为与上列 `woops-agent install` 对齐连接项刷新语义。PowerShell `File.Replace` 备份参数须 `[NullString]::Value`；legacy BAT 三态 `CFG_MODE`。新部署请用 `woops-agent install` |
 | `[x]` | Agent HTTPS 自注册 | Agent 启动先起 pre-auth `proxy`/`proxyBridge`，读取旁路 `install-code`，经统一 Gateway HTTP client 调 `POST /api/agent/register`（Gateway 反代私网 control-api）；响应 `assetId`/`agentToken`/`reused`；可选旧 `assetId` 复用并轮换 token，同时按安装码 `groupId` 迁移分组；上报 hostname、详细 OS/arch、内网 IP、`agentVersion`。凭据临时文件 sync 后原子替换（Windows `MoveFileExW`），确认后删除安装码，无需重启直接进入 control/metrics；同一被拒安装码不轰炸，替换文件后恢复 |
 | `[x]` | Agent 验 Gateway | control / session / metrics（含 portmap 隧道）共用 TLS dialer；有 pin 时校 SPKI；无 pin 走系统 CA；假 Gateway / 错 pin 在握手失败，不发 `agent-token`；可选 `gatewayProxy` 时经 HTTP CONNECT 出站（目标 DNS 由代理解析） |
