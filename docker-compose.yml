@@ -1,4 +1,4 @@
-﻿# 用 Docker Hub 预构建镜像拉起全栈（无需本机编译）。
+# 用 Docker Hub 预构建镜像拉起全栈（无需本机编译）。
 # 源码构建请用 deploy/docker-compose.yml。
 #
 # 前置：仓库根目录 .env（从 .env.example 复制）。deploy/tls 无证书时 tls-init 会自签并写入 compose-pin.env。
