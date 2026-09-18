@@ -4,7 +4,7 @@
 > 任何功能新增、完成、搁置、行为变更，都必须先读本文件，并在同一变更中更新对应条目的状态与说明。  
 > README 只保留快速启动。历史设计稿 `bastion_architecture_design_*.plan.md` 不必再读。
 
-**最后更新：** 2026-09-17（GitHub 镜像 + Release 产物；公开 Demo 环境：一键登录 broker + ADMIN 演示账号 + 自愈重置；真证书部署可免 SPKI pin；Agent 内网 IP 不再漏报桥接/VLAN/容器网卡；监控查询索引在 hypertable 上改按 chunk 建；英文 locale 不再露出中文文档 / 分组名 / 监控项名；Demo 分组不再每小时漂移）
+**最后更新：** 2026-09-18（资产设置可写备注 `assets.remark`；GitHub 镜像 + Release 产物；公开 Demo 环境：一键登录 broker + ADMIN 演示账号 + 自愈重置；真证书部署可免 SPKI pin；Agent 内网 IP 不再漏报桥接/VLAN/容器网卡；监控查询索引在 hypertable 上改按 chunk 建；英文 locale 不再露出中文文档 / 分组名 / 监控项名；Demo 分组不再每小时漂移）
 
 ---
 
@@ -96,11 +96,11 @@
 |------|------|------|
 | `[x]` | Asset 注册模型 | PK `assets.id` 即主机身份（落盘 `asset-id`）；hostname、在线、IP；`os` 为安装脚本上报的详细版本；`agent_version` 为 Agent 二进制版本（`yymmddhhMM`） |
 | `[x]` | 公网/内网 IP 自动上报 | **公网/来源 IP**：Gateway 控制 WSS 的 TCP `RemoteAddr`（**不**信 `X-Forwarded-For`），上线时写入 `assets.public_ip`（仅公网可路由地址；经正向代理则为最后一跳出站 IP）；**内网 IP**：Agent `core/netinfo` 本机网卡枚举（上线立刻报一次，之后每 **5 分钟**），与监控共用 `hostinfo/netiface` 排除 docker/veth/virbr/VMware/Wintun/VPN/`虚拟` 等；**桥接 / VLAN / 容器网卡不再误杀**：sysfs 除 `device`/`wireless`/`bonding`/`team` 外也认 `bridge` 与 `lower_*`（IP 落在 `br0`/`br1` 或 VLAN 子接口、成员网卡不带地址的物理机）；无 sysfs 判据时按主网卡名兜底（容器内唯一网卡是 veth peer `eth0`，否则内网 IP 全空）；docker 自建桥只按精确 `br-<12 hex>` 拒绝，运维自建的 `br-lan` 不受影响；**RFC1918 排前**，其后可含非 RFC1918 企业内网段（如 `188.x`）；内网变化写资产事件；**已移除** Agent 第三方公网探测（ipify 等）及用连接来源回填内网的兜底 |
-| `[x]` | 显示名 / 分组字段 | `group_id` 可空=未分组（仅「全部」可见）；列表 DTO 附带解析后的 `groupName`；旧列 `group_name` 已退役 |
+| `[x]` | 显示名 / 分组 / 备注 | `group_id` 可空=未分组（仅「全部」可见）；列表 DTO 附带解析后的 `groupName`；旧列 `group_name` 已退役；可选 `remark`（≤4096，自由文本，空=无备注；资产设置弹窗与显示名等同屏保存，`PATCH /api/assets/{id}`） |
 | `[x]` | ServerGroup 树 + 移动资产 | 表 `server_groups`；`GET/POST/PATCH/DELETE /api/groups`；资产 `?groupId=` / `?includeSubtree=` / `?rootOnly=`；控制台 `GroupTree.vue`：「全部」为顶（旁「+分组」建一级）、其下各级（旁「+分组」拆分下拉：点建子组，下拉重命名/删除）；右侧「显示所有」勾选后含子孙组资产（默认仅本级） |
 | `[ ]` | Credential 密文库 | AES-GCM + 主密钥；网关按票据取一次性凭据。**现** `desktop_password` 半明文；待做见 §9 |
 | `[x]` | ACL：用户可见范围 | `user_scopes`（`GROUP`/`ASSET`）；勾组含子树；单资产仅用不可删（详情 `canDelete`）；祖先组动态计算只读展示；角色×范围：可见≠可管（不可删/不可发安装码）；**可见=可开全部会话协议**（Shell/文件/桌面/exec），不做协议/动作细 ACL |
-| `[x]` | 资产列表 / 详情 / 删除 | 列表顶栏本地搜索（名称/主机名/公网 IP/内网 IP 任意子串；支持深链 `?q=`）；左侧分组支持深链 `?groupId=`（可选 `includeSubtree=`）；保留会话/监控操作；列表**不再自动轮询**（点顶栏刷新或切换分组/搜索深链时再拉）；列表紧凑列：**名称+主机名**、**内网 IP+公网 IP** 各一列两行（上行主文、下行小灰字、行距紧）；表头可前端排序：名称、在线、内网 IP、分组、系统、监控、Agent 版本；「详情」弹 dialog（非独立路由）：顶栏改显示名、跳转审计（操作/控制/资产事件，`?assetId=`）、**一键更新**（任何角色可用，可见资产即可；`POST /assets/{id}/agent-update` 发分组安装码并记控制审计 `UPDATE_AGENT`/「版本更新」，再用户 `exec` 票据跑安装命令，弹窗流式日志；**exec 结束后每 1s 轮询资产**，确认重新上线且 `agentVersion` 变化并刷新详情/列表版本号，最多约 120s；未分组/未保存分组变更/离线则拒绝；**更新命令自带代理前缀**：exec 环境无代理，故命令先从目标机 `agent.yaml` 读 `gatewayProxy` 并 `export https_proxy` 等（Linux `/etc/woops-agent/`，Windows `%ProgramData%\woops-agent\`），网闸后主机才能 curl 到 Gateway；读盘而非问 Agent；不回显代理值，避免泄露 user:pass）、RDP/VNC 桌面凭据与分组、左端口映射右部署 Token、可删资产（须输入显示名确认，提示中名称加粗红色）；顶栏按钮：审计+一键更新+删除一组、**保存单独**；无密码提醒；`DELETE` 仅超管/管理员且须在 scope；列表显示 `agentVersion`；**Agent 版本前**窄列「监控」：有异常时 danger tag 显示条数，悬停 tip 列明细（复用 `GET /dashboard/summary` 的 `abnormalAssets`，含离线） |
+| `[x]` | 资产列表 / 详情 / 删除 | 列表顶栏本地搜索（名称/主机名/公网 IP/内网 IP 任意子串；支持深链 `?q=`）；左侧分组支持深链 `?groupId=`（可选 `includeSubtree=`）；保留会话/监控操作；列表**不再自动轮询**（点顶栏刷新或切换分组/搜索深链时再拉）；列表紧凑列：**名称+主机名**、**内网 IP+公网 IP** 各一列两行（上行主文、下行小灰字、行距紧）；表头可前端排序：名称、在线、内网 IP、分组、系统、监控、Agent 版本；「详情」弹 dialog（非独立路由）：顶栏改显示名、**备注**（自由文本）、跳转审计（操作/控制/资产事件，`?assetId=`）、**一键更新**（任何角色可用，可见资产即可；`POST /assets/{id}/agent-update` 发分组安装码并记控制审计 `UPDATE_AGENT`/「版本更新」，再用户 `exec` 票据跑安装命令，弹窗流式日志；**exec 结束后每 1s 轮询资产**，确认重新上线且 `agentVersion` 变化并刷新详情/列表版本号，最多约 120s；未分组/未保存分组变更/离线则拒绝；**更新命令自带代理前缀**：exec 环境无代理，故命令先从目标机 `agent.yaml` 读 `gatewayProxy` 并 `export https_proxy` 等（Linux `/etc/woops-agent/`，Windows `%ProgramData%\woops-agent\`），网闸后主机才能 curl 到 Gateway；读盘而非问 Agent；不回显代理值，避免泄露 user:pass）、RDP/VNC 桌面凭据与分组、左端口映射右部署 Token、可删资产（须输入显示名确认，提示中名称加粗红色）；顶栏按钮：审计+一键更新+删除一组、**保存单独**；无密码提醒；`DELETE` 仅超管/管理员且须在 scope；列表显示 `agentVersion`；**Agent 版本前**窄列「监控」：有异常时 danger tag 显示条数，悬停 tip 列明细（复用 `GET /dashboard/summary` 的 `abnormalAssets`，含离线） |
 | `[x]` | 桌面凭据字段 | 统一 `desktop_port` / `desktop_username` / `desktop_password`；Win 首装默认 3389/`Administrator`，Linux 默认 5900/空用户名；资产详情可改（**可见即可改密码**）；列表/详情 API **不**回传密码明文（仅 `hasDesktopPassword`）；开票始终读库；已删除 `ssh_*`；**RDP 另存** `desktop_color_depth`（8/16/24/32，默认 **16**；Guacamole 无 15 位）与 `desktop_rdp_quality`（`low`/`medium`/`high`，默认 **`low`** 关壁纸/主题/字体平滑等） |
 
 ---

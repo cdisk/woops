@@ -25,6 +25,7 @@ public class AssetService {
     private static final int SHELL_CMD_MAX_COUNT = 30;
     private static final int SHELL_CMD_MAX_EACH = 8 * 1024;
     private static final int SHELL_CMD_MAX_TOTAL = 64 * 1024;
+    private static final int REMARK_MAX = 4096;
 
     private static final Comparator<AssetEntity> ASSET_BY_NAME = Comparator
             .comparing((AssetEntity a) -> nullToEmpty(a.getDisplayName()), String.CASE_INSENSITIVE_ORDER)
@@ -56,7 +57,7 @@ public class AssetService {
         this.alertStatus = alertStatus;
     }
 
-    public record UpdateRequest(String displayName, UUID groupId, Boolean updateGroup,
+    public record UpdateRequest(String displayName, String remark, UUID groupId, Boolean updateGroup,
                                 Integer desktopPort, String desktopUsername, String desktopPassword,
                                 Integer desktopColorDepth, String desktopRdpQuality) {}
 
@@ -109,6 +110,11 @@ public class AssetService {
         if (req.displayName() != null && !req.displayName().isBlank()) {
             asset.setDisplayName(req.displayName());
             changes.put("displayName", req.displayName());
+        }
+        if (req.remark() != null) {
+            String note = normalizeRemark(req.remark());
+            asset.setRemark(note);
+            changes.put("remark", note);
         }
         if (Boolean.TRUE.equals(req.updateGroup())) {
             if (req.groupId() == null) {
@@ -248,6 +254,7 @@ public class AssetService {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", a.getId().toString());
         m.put("displayName", a.getDisplayName());
+        m.put("remark", a.getRemark() == null ? "" : a.getRemark());
         m.put("hostname", a.getHostname() == null ? "" : a.getHostname());
         m.put("os", a.getOs() == null ? "" : a.getOs());
         m.put("arch", a.getArch() == null ? "" : a.getArch());
@@ -290,6 +297,14 @@ public class AssetService {
             case "low", "medium", "high" -> quality.trim().toLowerCase();
             default -> "low";
         };
+    }
+
+    private static String normalizeRemark(String remark) {
+        String t = remark.replace("\r\n", "\n").replace('\r', '\n');
+        if (t.length() > REMARK_MAX) {
+            throw new IllegalArgumentException("remark too long (max " + REMARK_MAX + ")");
+        }
+        return t;
     }
 
     private static String nullToEmpty(String s) {

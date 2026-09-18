@@ -226,6 +226,7 @@ export default {
     deleteAsset: '删除资产',
     desktopCredentials: '远程桌面凭据',
     groupPlaceholder: '未分组',
+    remarkPlaceholder: '可选，任意填写资产备注',
     rdpPort: 'RDP 端口',
     vncPort: 'VNC 端口',
     rdpUser: 'RDP 用户',

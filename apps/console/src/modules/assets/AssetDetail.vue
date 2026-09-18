@@ -52,6 +52,18 @@
 
     <p class="meta">{{ metaLine }}</p>
 
+    <section class="remark-section">
+      <h3>{{ t('common.remark') }}</h3>
+      <el-input
+        v-model="form.remark"
+        type="textarea"
+        :rows="3"
+        maxlength="4096"
+        show-word-limit
+        :placeholder="t('assets.remarkPlaceholder')"
+      />
+    </section>
+
     <section class="cred-section">
       <h3>{{ t('assets.desktopCredentials') }}</h3>
       <el-form label-width="96px" class="cred-form" @submit.prevent>
@@ -208,6 +220,7 @@ function setExecStatus(kind, text) {
 
 const form = reactive({
   displayName: '',
+  remark: '',
   groupId: null,
   desktopPort: 5900,
   desktopUsername: '',
@@ -253,6 +266,7 @@ function mapGroups(nodes) {
 function applyAsset(data) {
   asset.value = data
   form.displayName = data.displayName || ''
+  form.remark = data.remark || ''
   form.groupId = data.groupId || null
   form.desktopPort = data.desktopPort || (isWindows.value ? 3389 : 5900)
   form.desktopUsername = data.desktopUsername || ''
@@ -288,6 +302,7 @@ async function saveBasic() {
   try {
     const body = {
       displayName: form.displayName.trim(),
+      remark: form.remark,
       groupId: form.groupId || null,
       updateGroup: true,
       desktopPort: form.desktopPort,
@@ -678,12 +693,14 @@ onBeforeUnmount(() => {
   font-size: 13px;
   line-height: 1.5;
 }
+.remark-section,
 .cred-section {
   border: 1px solid #e5e7eb;
   border-radius: 6px;
   padding: 12px 16px;
   background: #fff;
 }
+.remark-section h3,
 .cred-section h3,
 .panel h3 {
   margin: 0 0 12px;

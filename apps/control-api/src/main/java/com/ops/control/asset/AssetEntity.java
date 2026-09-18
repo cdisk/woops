@@ -18,6 +18,10 @@ public class AssetEntity {
     @Column(name = "display_name", nullable = false, length = 256)
     private String displayName;
 
+    /** Free-form operator note; empty string when unset. */
+    @Column(length = 4096)
+    private String remark = "";
+
     @Column(length = 256)
     private String hostname;
 
@@ -86,6 +90,8 @@ public class AssetEntity {
     public void setId(UUID id) { this.id = id; }
     public String getDisplayName() { return displayName; }
     public void setDisplayName(String displayName) { this.displayName = displayName; }
+    public String getRemark() { return remark; }
+    public void setRemark(String remark) { this.remark = remark; }
     public String getHostname() { return hostname; }
     public void setHostname(String hostname) { this.hostname = hostname; }
     public String getOs() { return os; }

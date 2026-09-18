@@ -232,6 +232,7 @@ export default {
     deleteAsset: 'Delete asset',
     desktopCredentials: 'Remote desktop credentials',
     groupPlaceholder: 'Ungrouped',
+    remarkPlaceholder: 'Optional free-form note for this asset',
     rdpPort: 'RDP port',
     vncPort: 'VNC port',
     rdpUser: 'RDP user',
