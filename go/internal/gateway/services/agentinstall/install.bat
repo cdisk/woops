@@ -102,11 +102,42 @@ if defined BUILD if !BUILD! LSS 17763 (
   )
 )
 
-REM Existing YAML may contain nested proxy/proxyBridge settings. Pure legacy cmd
-REM cannot safely edit arbitrary YAML/UTF-8, so preserve it byte-for-byte.
-REM Gateway/pin refresh is intentionally skipped for existing config.
-if not exist "%CFG%" (
-  set "CFG_TMP=%CONF_DIR%\agent.yaml.tmp"
+REM Connection keys (gateway / pin) must always follow the install link, or the Agent
+REM sends the new install-code to the old Gateway and gets rejected forever. Host-local
+REM settings (gatewayProxy, proxy, proxyBridge, metrics) must survive untouched, so drop
+REM only the two column-0 keys via findstr and re-append them; findstr passes blank
+REM lines, indentation and UTF-8 bytes through unchanged.
+REM mode: keep = gateway already correct, rewrite = surgical edit, fresh = minimal config.
+REM A UTF-8 BOM glues itself to line 1 and defeats findstr /B there, so the old
+REM gateway: would survive and collide with the appended one; when the key is not
+REM matchable at column 0, fall back to a config that is guaranteed to parse.
+set "CFG_MODE=fresh"
+if exist "%CFG%" (
+  set "CFG_MODE=rewrite"
+  findstr /B /I /C:"gateway:" "%CFG%" | findstr /I /C:"%GATEWAY%" >nul 2>&1
+  if not errorlevel 1 set "CFG_MODE=keep"
+)
+if "!CFG_MODE!"=="rewrite" (
+  findstr /B /I /C:"gateway:" "%CFG%" >nul 2>&1
+  if errorlevel 1 set "CFG_MODE=fresh"
+)
+
+set "CFG_TMP=%CONF_DIR%\agent.yaml.tmp"
+if "!CFG_MODE!"=="keep" echo ==^> Existing agent.yaml preserved ^(gateway unchanged^)
+if "!CFG_MODE!"=="rewrite" (
+  echo ==^> Gateway changed; refreshing gateway + pin, keeping local proxy settings ^(backup: %CFG%.bak^)
+  copy /Y "%CFG%" "%CFG%.bak" >nul
+  findstr /V /B /I /C:"gateway:" /C:"gatewayTlsSpkiSha256:" "%CFG%" >"!CFG_TMP!" 2>nul
+  >>"!CFG_TMP!" echo.
+  >>"!CFG_TMP!" echo gateway: "%GATEWAY%"
+  >>"!CFG_TMP!" echo gatewayTlsSpkiSha256: "%TLS_PIN%"
+)
+if "!CFG_MODE!"=="fresh" (
+  if exist "%CFG%" (
+    echo ==^> agent.yaml not editable by legacy cmd; writing minimal config ^(backup: %CFG%.bak^)
+    echo [WARN] re-add proxy / proxyBridge from the .bak copy if the Agent cannot reach the new Gateway
+    copy /Y "%CFG%" "%CFG%.bak" >nul
+  )
   >"!CFG_TMP!" (
     echo gateway: "%GATEWAY%"
     echo gatewayTlsSpkiSha256: "%TLS_PIN%"
@@ -114,13 +145,13 @@ if not exist "%CFG%" (
     echo metrics:
     echo   enabled: false
   )
+)
+if not "!CFG_MODE!"=="keep" (
   move /Y "!CFG_TMP!" "%CFG%" >nul
   if errorlevel 1 (
     echo [ERROR] Cannot publish agent.yaml
     exit /b 1
   )
-) else (
-  echo ==^> Existing agent.yaml preserved ^(including proxyBridge^)
 )
 
 REM Publish install-code only after agent.yaml. Agent performs registration and

@@ -182,6 +182,12 @@ func TestRenderWindows(t *testing.T) {
 	if !strings.Contains(out, "Set-AtomicContent") || !strings.Contains(out, "[System.IO.File]::Replace") {
 		t.Fatal("PowerShell config/install-code writes must use same-volume atomic replacement")
 	}
+	// PS 5.1 binds $null to a string parameter as "", and File.Replace rejects an
+	// empty backup path with ArgumentException, breaking every reinstall.
+	if !strings.Contains(out, "::Replace($tmp, $Path, [NullString]::Value)") ||
+		!strings.Contains(out, "::Replace($InstallCodeTmp, $InstallCodePath, [NullString]::Value)") {
+		t.Fatal("File.Replace backup path must be [NullString]::Value, not $null")
+	}
 	if !strings.Contains(out, "/inheritance:r") || !strings.Contains(out, "*S-1-5-18:F") ||
 		!strings.Contains(out, "*S-1-5-32-544:F") {
 		t.Fatal("install-code ACL must be restricted to SYSTEM and Administrators")
@@ -228,12 +234,26 @@ func TestRenderWindowsBat(t *testing.T) {
 		!strings.Contains(out, `restart-update.bat`) {
 		t.Fatal("install.bat must stage a detached live update")
 	}
-	if !strings.Contains(out, `if not exist "%CFG%" (`) ||
-		!strings.Contains(out, "Existing agent.yaml preserved ^(including proxyBridge^)") {
-		t.Fatal("legacy BAT must preserve an existing config, including proxyBridge")
+	if !strings.Contains(out, `set "CFG_MODE=fresh"`) ||
+		!strings.Contains(out, `findstr /B /I /C:"gateway:" "%CFG%" | findstr /I /C:"%GATEWAY%"`) ||
+		!strings.Contains(out, "Existing agent.yaml preserved ^(gateway unchanged^)") {
+		t.Fatal("legacy BAT must leave an existing config untouched while the gateway matches")
 	}
-	if strings.Contains(out, `>"%CFG%" (`) || strings.Contains(out, `findstr /V /C:"gateway:"`) {
-		t.Fatal("legacy BAT must not rewrite or merge an existing YAML file")
+	// Preserving a stale gateway would make the Agent send the new install-code to
+	// the old Gateway, which rejects it forever, so a changed gateway must refresh
+	// the connection keys while host-local proxy settings survive byte-for-byte.
+	if !strings.Contains(out, `findstr /V /B /I /C:"gateway:" /C:"gatewayTlsSpkiSha256:" "%CFG%" >"!CFG_TMP!"`) ||
+		!strings.Contains(out, `>>"!CFG_TMP!" echo gateway: "%GATEWAY%"`) ||
+		!strings.Contains(out, `>>"!CFG_TMP!" echo gatewayTlsSpkiSha256: "%TLS_PIN%"`) ||
+		!strings.Contains(out, `copy /Y "%CFG%" "%CFG%.bak"`) {
+		t.Fatal("legacy BAT must surgically refresh gateway + pin and keep other keys")
+	}
+	// A UTF-8 BOM defeats findstr /B on line 1, leaving a duplicate gateway: key.
+	if !strings.Contains(out, "agent.yaml not editable by legacy cmd; writing minimal config") {
+		t.Fatal("legacy BAT needs a parseable fallback when gateway: is not matchable at column 0")
+	}
+	if strings.Contains(out, `>"%CFG%" (`) || strings.Contains(out, `>>"%CFG%"`) {
+		t.Fatal("legacy BAT must build agent.yaml in a temp file, never edit it in place")
 	}
 	if !strings.Contains(out, `echo [ERROR] Service start failed`) {
 		t.Fatal("manual install must report service start failures")
@@ -249,7 +269,7 @@ func TestRenderWindowsBat(t *testing.T) {
 		strings.Contains(out, `>"%ID_FILE%"`) {
 		t.Fatal("legacy BAT must delegate registration and credential writes to Agent bootstrap")
 	}
-	configAt := strings.Index(out, `if not exist "%CFG%" (`)
+	configAt := strings.Index(out, `set "CFG_MODE=fresh"`)
 	codeAt := strings.Index(out, `set "CODE_TMP=%CONF_DIR%\install-code.tmp"`)
 	serviceAt := strings.Index(out, `set "BINPATH=`)
 	if configAt < 0 || codeAt < 0 || serviceAt < 0 || !(configAt < codeAt && codeAt < serviceAt) {

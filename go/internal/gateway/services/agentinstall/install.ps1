@@ -167,11 +167,14 @@ Write-Host "==> Agent version: $AgentVersion"
 $GatewayUrl = $GatewayBase.TrimEnd('/')
 $TlsPin = $GatewayTlsSpkiSha256
 $Cfg = Join-Path $ConfDir 'agent.yaml'
+# [NullString]::Value, not $null: PowerShell binds $null to a string parameter as
+# '', and File.Replace resolves any non-null backup path, so '' throws
+# ArgumentException ("path is not of a legal form").
 function Set-AtomicContent([string]$Path, [object]$Value, [string]$Encoding) {
   $tmp = Join-Path ([System.IO.Path]::GetDirectoryName($Path)) ('.' + [System.IO.Path]::GetFileName($Path) + '.' + [Guid]::NewGuid().ToString('N') + '.tmp')
   Set-Content -LiteralPath $tmp -Value $Value -Encoding $Encoding
   if (Test-Path -LiteralPath $Path) {
-    [System.IO.File]::Replace($tmp, $Path, $null)
+    [System.IO.File]::Replace($tmp, $Path, [NullString]::Value)
   } else {
     Move-Item -LiteralPath $tmp -Destination $Path
   }
@@ -252,7 +255,7 @@ if ($LASTEXITCODE -ne 0) {
   throw 'failed to restrict temporary install-code ACL'
 }
 if (Test-Path -LiteralPath $InstallCodePath) {
-  [System.IO.File]::Replace($InstallCodeTmp, $InstallCodePath, $null)
+  [System.IO.File]::Replace($InstallCodeTmp, $InstallCodePath, [NullString]::Value)
 } else {
   Move-Item -LiteralPath $InstallCodeTmp -Destination $InstallCodePath
 }
