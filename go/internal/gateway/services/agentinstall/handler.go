@@ -90,6 +90,9 @@ func serveAgent(dir string, parts []string, w http.ResponseWriter, r *http.Reque
 	if osName == "windows" {
 		filename = "woops-agent.exe"
 	}
+	// Legacy: ?format=gz returns a gzip *payload* (Content-Type: application/gzip).
+	// Prefer Content-Encoding negotiation so `curl --compressed` transparently
+	// decompresses to the raw binary (used by the Go install one-liner).
 	if r.URL.Query().Get("format") == "gz" {
 		gzPath := binPath + ".gz"
 		if st, err := os.Stat(gzPath); err != nil || st.IsDir() {
@@ -101,9 +104,29 @@ func serveAgent(dir string, parts []string, w http.ResponseWriter, r *http.Reque
 		http.ServeFile(w, r, gzPath)
 		return
 	}
+	gzPath := binPath + ".gz"
+	if acceptsGzip(r.Header.Get("Accept-Encoding")) {
+		if st, err := os.Stat(gzPath); err == nil && !st.IsDir() {
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Header().Set("Content-Encoding", "gzip")
+			w.Header().Set("Content-Disposition", "attachment; filename="+filename)
+			http.ServeFile(w, r, gzPath)
+			return
+		}
+	}
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", "attachment; filename="+filename)
 	http.ServeFile(w, r, binPath)
+}
+
+func acceptsGzip(header string) bool {
+	for _, part := range strings.Split(header, ",") {
+		token := strings.TrimSpace(strings.Split(part, ";")[0])
+		if strings.EqualFold(token, "gzip") {
+			return true
+		}
+	}
+	return false
 }
 
 func serveWinpty(dir string, parts []string, w http.ResponseWriter, r *http.Request) {

@@ -127,7 +127,7 @@ func winptyRuntimeDir() (string, error) {
 	dir := filepath.Dir(exe)
 	for _, name := range []string{"winpty.dll", "winpty-agent.exe"} {
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
-			return "", fmt.Errorf("%s missing next to woops-agent (%s); re-run install.ps1 on this host (WinPTY required when ConPTY is unavailable)", name, dir)
+			return "", fmt.Errorf("%s missing next to woops-agent (%s); re-run: woops-agent install … (WinPTY required when ConPTY is unavailable)", name, dir)
 		}
 	}
 	return dir, nil

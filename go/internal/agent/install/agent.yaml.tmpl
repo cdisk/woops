@@ -1,0 +1,27 @@
+# 运维主要改 gateway；凭据在同目录 asset-id / agent-token（安装下发，勿写入本文件）。
+# 生产请使用 https://…；自签名/动态 IP 时配置 gatewayTlsSpkiSha256（公钥指纹）。
+gateway: "__GATEWAY__"
+gatewayTlsSpkiSha256: "__TLS_PIN__"
+# 可选：连 Gateway 的出站 HTTP 代理（网闸后）。安装时若设置了 https_proxy 等会自动写入。
+# 若同时开启下方 proxy.*，入站代理出站也会经此上游串联（C→本机→上游→Gateway）。
+# gatewayProxy: "http://user:pass@10.0.0.1:3128"
+
+# 可选：监控插件（独立 /ws/agent/metrics）
+# metrics:
+#   enabled: true
+#   intervalSec: 60
+
+# 端口映射：在控制台配置，无需在此填写。
+# Gateway 在 Agent 上线后下发隧道；映射监听端口在 Gateway 侧，不在本机。
+
+# 可选：HTTP 正向代理插件（边缘 / 网闸）。配置错误或绑定失败只禁用本插件，不影响上线。
+# 注意：这是「别人连我」的入站代理；与上方 gatewayProxy（我连 Gateway）不是一回事。
+# proxy:
+#   enabled: false
+#   listen: "0.0.0.0:3128"          # 启用时默认监听
+#   username: "proxyuser"           # 启用时必填
+#   password: "changeme"            # 启用时必填
+#   allowCIDRs:                     # 客户端来源；省略/空 = 不限制
+#     - "10.0.0.0/8"
+#     - "192.168.0.0/16"
+#   allowGlobal: false              # false = 仅允许访问 ops（gateway 主机 :网关端口 与 :9100）

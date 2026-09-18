@@ -306,7 +306,7 @@ export default {
       '#    $env:Path = "D:\\path\\to\\curl\\bin;$env:Path"',
     proxyToggle: 'Install via HTTP proxy (air-gap / intranet). Click for env vars and examples.',
     proxyBody1:
-      'The install script does not accept custom proxy CLI flags; download/register use curl (curl.exe on Windows) and only system env vars:',
+      'The install command does not accept custom proxy CLI flags; download uses curl (curl.exe on Windows) and only system env vars. The agent install subcommand then persists them:',
     proxyVars:
       'Vars: https_proxy / HTTPS_PROXY (recommended when Gateway is HTTPS); also http_proxy / HTTP_PROXY, ALL_PROXY',
     proxyFormat:
@@ -319,7 +319,7 @@ export default {
     proxyWinCmdExample: 'Windows (CMD / Win7·Server 2012) example:',
     proxyWinCmdComment: '# set in the same CMD window, then run the CMD install command above',
     proxyFoot:
-      'The install script writes those env vars into agent.yaml as gatewayProxy so Agent→Gateway WSS uses CONNECT. Inbound proxy.* on this host also chains the same upstream automatically (e.g. C→B→A→Gateway). If you see curl: (22) … 502, a hop in the proxy chain is likely down (check journalctl -u woops-agent for proxy plugin: / upstream CONNECT).'
+      'woops-agent install writes those env vars into agent.yaml as gatewayProxy so Agent→Gateway WSS uses CONNECT. Inbound proxy.* on this host also chains the same upstream automatically (e.g. C→B→A→Gateway). If you see curl: (22) … 502, a hop in the proxy chain is likely down (check journalctl -u woops-agent for proxy plugin: / upstream CONNECT).'
   },
 
   groups: {

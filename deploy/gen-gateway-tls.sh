@@ -144,10 +144,10 @@ echo "gateway: \"https://<host>:9200\""
 echo "gatewayTlsSpkiSha256: \"$PIN\""
 echo
 echo "==> Linux install (example)"
-echo "curl -fsSL -k --pinnedpubkey $CURL_PIN https://<host>:9200/i/<code>/install.sh | bash"
+echo "curl -fsSL -k --pinnedpubkey $CURL_PIN --compressed -o /tmp/woops-agent \"https://<host>:9200/i/<code>/agent/linux/\$(uname -m | sed -e s/x86_64/amd64/ -e s/aarch64/arm64/)\" && chmod +x /tmp/woops-agent && /tmp/woops-agent install -gateway https://<host>:9200 -code <code> -pin $PIN"
 echo
 echo "==> Windows install (example; need curl.exe — Console shows install tip if missing)"
-echo "\$f=Join-Path \$env:TEMP woops-install.ps1; curl.exe -fsSL -k --pinnedpubkey $CURL_PIN -o \$f https://<host>:9200/i/<code>/install.ps1; powershell -NoProfile -ExecutionPolicy Bypass -File \$f"
+echo "curl.exe -fsSL -k --pinnedpubkey $CURL_PIN --compressed -o \"%TEMP%\\woops-agent.exe\" https://<host>:9200/i/<code>/agent/windows/amd64 && \"%TEMP%\\woops-agent.exe\" install -gateway https://<host>:9200 -code <code> -pin $PIN"
 echo
 echo "==> openssl verify leaf (self-signed will fail system trust; pin is the trust root)"
 openssl x509 -in "$CERT" -noout -subject -dates -ext subjectAltName 2>/dev/null \

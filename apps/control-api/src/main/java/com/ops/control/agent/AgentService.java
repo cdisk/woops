@@ -97,15 +97,13 @@ public class AgentService {
                 null,
                 ControlAuditService.jsonDetail(detail));
         Map<String, Object> out = new LinkedHashMap<>(minted.response());
-        out.put("curl", withAgentProxyLinux(String.valueOf(out.get("curl"))));
-        // Modern Windows one-click update: install.ps1 under ProgramData.
-        out.put("powershell", withAgentProxyWindows(buildWindowsUpdateCommand(
-                String.valueOf(out.get("installUrlWindows")),
-                props.gatewayTlsSpkiSha256Normalized())));
-        // Win7 / Server 2012 one-click update: install.bat under ProgramData (exec is PowerShell).
-        out.put("cmd", withAgentProxyWindows(buildWindowsLegacyUpdateCommand(
-                String.valueOf(out.get("installUrlWindowsLegacy")),
-                props.gatewayTlsSpkiSha256Normalized())));
+        String pin = props.gatewayTlsSpkiSha256Normalized();
+        String gatewayBase = String.valueOf(out.get("gatewayBase"));
+        String code = String.valueOf(out.get("code"));
+        // Re-wrap with gatewayProxy export: exec inherits no proxy env on air-gapped hosts.
+        out.put("curl", withAgentProxyLinux(buildLinuxInstallCurl(gatewayBase, code, pin)));
+        out.put("powershell", withAgentProxyWindows(buildWindowsInstallCommand(gatewayBase, code, pin, true)));
+        out.put("cmd", withAgentProxyWindows(buildWindowsInstallCommand(gatewayBase, code, pin, true)));
         out.put("assetId", asset.getId().toString());
         out.put("fromAgentVersion", asset.getAgentVersion() == null ? "" : asset.getAgentVersion());
         return out;
@@ -165,10 +163,10 @@ public class AgentService {
         installCodes.save(entity);
 
         var endpoints = PublicUrlResolver.resolve(request, props);
-        String base = endpoints.gatewayHttp() + "/i/" + entity.getCode();
-        String linuxUrl = base + "/install.sh";
-        String windowsUrl = base + "/install.ps1";
-        String legacyBatUrl = base + "/install.bat";
+        String gatewayBase = endpoints.gatewayHttp().replaceAll("/+$", "");
+        String base = gatewayBase + "/i/" + entity.getCode();
+        String linuxUrl = base + "/agent/linux/amd64";
+        String windowsUrl = base + "/agent/windows/amd64";
         String pin = props.gatewayTlsSpkiSha256Normalized();
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("code", entity.getCode());
@@ -177,13 +175,14 @@ public class AgentService {
         out.put("expiresAt", entity.getExpiresAt().toString());
         out.put("installUrl", linuxUrl);
         out.put("installUrlWindows", windowsUrl);
-        out.put("installUrlWindowsLegacy", legacyBatUrl);
+        out.put("installUrlWindowsLegacy", windowsUrl);
+        out.put("gatewayBase", gatewayBase);
         if (!pin.isBlank()) {
             out.put("gatewayTlsSpkiSha256", pin);
         }
-        out.put("curl", buildLinuxInstallCurl(linuxUrl, pin));
-        out.put("powershell", buildWindowsInstallCommand(windowsUrl, pin));
-        out.put("cmd", buildWindowsLegacyInstallCommand(legacyBatUrl, pin));
+        out.put("curl", buildLinuxInstallCurl(gatewayBase, entity.getCode(), pin));
+        out.put("powershell", buildWindowsInstallCommand(gatewayBase, entity.getCode(), pin, false));
+        out.put("cmd", buildWindowsLegacyInstallCommand(gatewayBase, entity.getCode(), pin));
         return new MintedInstallCode(entity.getId(), entity.getExpiresAt(), out);
     }
 
@@ -445,86 +444,66 @@ public class AgentService {
     }
 
     /**
-     * Console one-liner. With pin: {@code -k --pinnedpubkey} — curl still verifies CA first, so
-     * self-signed needs {@code -k}; pin remains enforced (wrong key → fail). Without pin: no {@code -k}.
+     * Console one-liner: download the agent binary (TLS pin on the binary itself), then run
+     * {@code woops-agent install}. Architecture is probed inline so amd64/arm64 share one command.
+     * With pin: {@code -k --pinnedpubkey} — curl still verifies CA first, so self-signed needs
+     * {@code -k}; pin remains enforced.
      */
-    static String buildLinuxInstallCurl(String linuxUrl, String pinHex) {
+    static String buildLinuxInstallCurl(String gatewayBase, String code, String pinHex) {
+        String url = gatewayBase + "/i/" + code
+                + "/agent/linux/$(uname -m | sed -e s/x86_64/amd64/ -e s/aarch64/arm64/)";
+        String curl;
         if (pinHex == null || pinHex.isBlank()) {
-            return "curl -fsSL " + linuxUrl + " | bash";
+            curl = "curl -fsSL --compressed -o /tmp/woops-agent \"" + url + "\"";
+        } else {
+            String pinned = "sha256//" + Base64.getEncoder().encodeToString(HexFormat.of().parseHex(pinHex));
+            curl = "curl -fsSL -k --pinnedpubkey " + pinned + " --compressed -o /tmp/woops-agent \"" + url + "\"";
         }
-        String pinned = "sha256//" + Base64.getEncoder().encodeToString(HexFormat.of().parseHex(pinHex));
-        return "curl -fsSL -k --pinnedpubkey " + pinned + " " + linuxUrl + " | bash";
+        return curl + " && chmod +x /tmp/woops-agent && /tmp/woops-agent " + installArgs(gatewayBase, code, pinHex);
     }
 
     /**
-     * Windows one-liner: download install.ps1 to a temp file, then {@code -File} it.
-     * Path must use {@code Join-Path} (or quoted {@code "$env:TEMP\…"}): bare
-     * {@code $env:TEMP\file} is a PowerShell parse error.
-     * Do not use {@code curl | iex} (line-wise) or {@code iex (…|Out-String)} (Out-String wraps
-     * to console width and breaks scripts).
+     * Windows PowerShell one-liner. {@code useProgramData} is for one-click update under LocalSystem
+     * (no reliable TEMP); manual install uses {@code $env:TEMP}.
      */
-    static String buildWindowsInstallCommand(String windowsUrl, String pinHex) {
+    static String buildWindowsInstallCommand(String gatewayBase, String code, String pinHex, boolean useProgramData) {
+        String url = gatewayBase + "/i/" + code + "/agent/windows/amd64";
+        String destSetup = useProgramData
+                ? "$d=Join-Path $env:ProgramData 'woops-agent'; New-Item -ItemType Directory -Force -Path $d | Out-Null; $f=Join-Path $d 'woops-agent-setup.exe'; "
+                : "$f=Join-Path $env:TEMP woops-agent.exe; ";
         String curl;
         if (pinHex == null || pinHex.isBlank()) {
-            curl = "curl.exe -fsSL -o $f " + windowsUrl;
+            curl = "curl.exe -fsSL --compressed -o $f " + url;
         } else {
             String pinned = "sha256//" + Base64.getEncoder().encodeToString(HexFormat.of().parseHex(pinHex));
-            curl = "curl.exe -fsSL -k --pinnedpubkey " + pinned + " -o $f " + windowsUrl;
+            curl = "curl.exe -fsSL -k --pinnedpubkey " + pinned + " --compressed -o $f " + url;
         }
-        return "$f=Join-Path $env:TEMP woops-install.ps1; " + curl
-                + "; powershell -NoProfile -ExecutionPolicy Bypass -File $f";
+        return destSetup + curl + "; if ($LASTEXITCODE -ne 0) { throw 'curl failed' }; & $f "
+                + installArgs(gatewayBase, code, pinHex);
     }
 
     /**
-     * Win7 / Server 2012 one-liner: download install.bat to TEMP and run (pure cmd, no PowerShell).
+     * Win7 / Server 2012 one-liner: pure cmd (no PowerShell {@code &&} / {@code Join-Path}).
      */
-    static String buildWindowsLegacyInstallCommand(String batUrl, String pinHex) {
-        String installBat = "\"%TEMP%\\install.bat\"";
+    static String buildWindowsLegacyInstallCommand(String gatewayBase, String code, String pinHex) {
+        String url = gatewayBase + "/i/" + code + "/agent/windows/amd64";
+        String exe = "\"%TEMP%\\woops-agent.exe\"";
         String curl;
         if (pinHex == null || pinHex.isBlank()) {
-            curl = "curl.exe -fsSL -o " + installBat + " " + batUrl;
+            curl = "curl.exe -fsSL --compressed -o " + exe + " " + url;
         } else {
             String pinned = "sha256//" + Base64.getEncoder().encodeToString(HexFormat.of().parseHex(pinHex));
-            curl = "curl.exe -fsSL -k --pinnedpubkey " + pinned + " -o " + installBat + " " + batUrl;
+            curl = "curl.exe -fsSL -k --pinnedpubkey " + pinned + " --compressed -o " + exe + " " + url;
         }
-        // This is pasted directly into an elevated cmd.exe, so avoid a redundant cmd /c and nested quotes.
-        return curl + " && call " + installBat;
+        return curl + " && " + exe + " " + installArgs(gatewayBase, code, pinHex);
     }
 
-    /**
-     * One-click update: download install.ps1 under ProgramData (LocalSystem may have no TEMP).
-     */
-    static String buildWindowsUpdateCommand(String ps1Url, String pinHex) {
-        String curl;
-        if (pinHex == null || pinHex.isBlank()) {
-            curl = "curl.exe -fsSL -o $f " + ps1Url;
-        } else {
-            String pinned = "sha256//" + Base64.getEncoder().encodeToString(HexFormat.of().parseHex(pinHex));
-            curl = "curl.exe -fsSL -k --pinnedpubkey " + pinned + " -o $f " + ps1Url;
+    private static String installArgs(String gatewayBase, String code, String pinHex) {
+        String args = "install -gateway " + gatewayBase + " -code " + code;
+        if (pinHex != null && !pinHex.isBlank()) {
+            args += " -pin " + pinHex;
         }
-        return "$d=Join-Path $env:ProgramData 'woops-agent'; "
-                + "New-Item -ItemType Directory -Force -Path $d | Out-Null; "
-                + "$f=Join-Path $d 'install.ps1'; " + curl
-                + "; if ($LASTEXITCODE -ne 0) { throw 'curl failed' }; "
-                + "powershell -NoProfile -ExecutionPolicy Bypass -File $f";
-    }
-
-    /**
-     * Legacy manual update fallback: download install.bat under ProgramData.
-     */
-    static String buildWindowsLegacyUpdateCommand(String batUrl, String pinHex) {
-        String curl;
-        if (pinHex == null || pinHex.isBlank()) {
-            curl = "curl.exe -fsSL -o $f " + batUrl;
-        } else {
-            String pinned = "sha256//" + Base64.getEncoder().encodeToString(HexFormat.of().parseHex(pinHex));
-            curl = "curl.exe -fsSL -k --pinnedpubkey " + pinned + " -o $f " + batUrl;
-        }
-        return "$d=Join-Path $env:ProgramData 'woops-agent'; "
-                + "New-Item -ItemType Directory -Force -Path $d | Out-Null; "
-                + "$f=Join-Path $d 'install.bat'; " + curl
-                + "; if ($LASTEXITCODE -ne 0) { throw 'curl failed' }; "
-                + "& cmd.exe /d /c ('call \"' + $f + '\"')";
+        return args;
     }
 
     public record RegisterRequest(

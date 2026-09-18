@@ -13,7 +13,12 @@
 | 只能经 Bridge 出 Gateway | B 开 `proxy.*` + `proxyBridge.listen`，A 开 `proxyBridge.targets`（见 [§6](#6-编写-agentyaml)） |
 | 架构不匹配 | 目标机 `uname -m` 为 `aarch64` 须用 **arm64** 包，`x86_64` 用 **amd64**（Docker Gateway 镜像内两者均有） |
 
-手动安装等价于安装脚本做的事：**放二进制 → 写 `agent.yaml` → 写 `install-code` → 启 systemd → Agent 自注册**。
+手动安装等价于 `woops-agent install` 做的事：**放二进制 → 写/合并 `agent.yaml`（刷新 gateway+pin，保留本机 proxy）→ 写 `install-code` → 注册服务 → Agent 自注册**。也可直接对已拷到目标机的二进制执行：
+
+```bash
+chmod +x /path/to/woops-agent
+/path/to/woops-agent install -gateway https://woops.example.com:9200 -code '<安装码>' -pin '<hex pin>'
+```
 
 ---
 
@@ -22,7 +27,7 @@
 1. 控制台 → **资产** → 左侧选中目标**分组**（「全部」不能发码）→ **生成安装链接**。
 2. 弹窗顶部有 **「安装码」** 一行，点 **复制** 即可（离线手工装用这个）。
 3. 也可从安装链接 URL 中取中间段：  
-   `https://<gateway>/i/<安装码>/install.sh` → `<安装码>` 即所需字符串。
+   `https://<gateway>/i/<安装码>/agent/linux/amd64` → `<安装码>` 即所需字符串。
 4. 安装码约 **15 分钟**有效；过期在控制台重新生成，替换目标机 `/etc/woops-agent/install-code` 后重启 Agent。
 5. 须绑定分组；注册成功后 Agent 会删除 `install-code`，并写入 `asset-id`、`agent-token`。
 

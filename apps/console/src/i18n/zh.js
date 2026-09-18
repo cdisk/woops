@@ -296,7 +296,7 @@ export default {
       '#    解压后把含 curl.exe 的 bin 目录加入 PATH，或：\n' +
       '#    $env:Path = "D:\\path\\to\\curl\\bin;$env:Path"',
     proxyToggle: '经 HTTP 代理安装（网闸 / 内网）。点此查看变量写法与示例。',
-    proxyBody1: '安装脚本不识别命令行里的自定义代理参数；下载与注册走 curl（Windows 为 curl.exe），只认系统环境变量：',
+    proxyBody1: '安装命令不识别命令行里的自定义代理参数；下载走 curl（Windows 为 curl.exe），只认系统环境变量。随后 woops-agent install 会把它们写入配置：',
     proxyVars:
       '变量：https_proxy / HTTPS_PROXY（推荐，Gateway 为 HTTPS）；也可设 http_proxy / HTTP_PROXY、ALL_PROXY',
     proxyFormat:
@@ -308,7 +308,7 @@ export default {
     proxyWinCmdExample: 'Windows（CMD / Win7·Server 2012）示例：',
     proxyWinCmdComment: '# 同一 CMD 窗口内 set 后再执行上方 CMD 安装命令',
     proxyFoot:
-      '安装脚本会把上述环境变量写入 agent.yaml 的 gatewayProxy：本机 Agent→Gateway 的 WSS 经其 CONNECT。若本机再开入站 proxy.*，给下一跳用时也会自动串同一上游（例：C→B→A→Gateway）。若出现 curl: (22) … 502：多半是代理链某跳连不上（看 journalctl -u woops-agent 里 proxy plugin: / upstream CONNECT）。'
+      'woops-agent install 会把上述环境变量写入 agent.yaml 的 gatewayProxy：本机 Agent→Gateway 的 WSS 经其 CONNECT。若本机再开入站 proxy.*，给下一跳用时也会自动串同一上游（例：C→B→A→Gateway）。若出现 curl: (22) … 502：多半是代理链某跳连不上（看 journalctl -u woops-agent 里 proxy plugin: / upstream CONNECT）。'
   },
 
   groups: {

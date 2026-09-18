@@ -111,7 +111,7 @@ cp .env.example .env          # Windows: copy .env.example .env
 #   OPS_CONTROL_PUBLIC_HTTP=http://<同上>:9100
 # 生产务必改 OPS_JWT_SECRET / OPS_TICKET_SECRET / 管理员密码
 
-# 3. 拉镜像并启动（默认标签 0.1.9；可改 WOOPS_IMAGE_TAG=latest）
+# 3. 拉镜像并启动（默认标签 0.1.10；可改 WOOPS_IMAGE_TAG=latest）
 #    若 deploy/tls/ 尚无证书，compose 的 tls-init 会按 .env 里 PUBLIC 地址自签，
 #    并把匹配的 SPKI pin 写入 deploy/compose-pin.env（覆盖 .env 里空/旧 pin）
 docker compose --env-file .env --profile full --profile desktop up -d
@@ -159,13 +159,13 @@ JDK 21、Maven、Node 20+、Docker（Postgres / 可选 guacd）、OpenSSL（生�
 
 ### 1.4) Agent 支持的操作系统
 
-安装脚本与 Agent 二进制当前以 **amd64** 为主（Windows / Linux）；`install.ps1` / `install.sh` 亦预留 arm64 占位，Gateway 有对应产物时可装。
+安装以 **amd64** 为主（Windows / Linux）；Linux 安装命令内联 `uname -m` 也可装 **arm64**（Gateway 镜像内两者均有）。
 
 | 平台 | 支持范围 | 安装方式 | Shell / 备注 |
 |------|----------|----------|----------------|
-| **Linux** | 常见 amd64 发行版（systemd 服务） | `install.sh`（`curl … \| bash`） | 原生 PTY Shell（bash/sh）；VNC 需目标机有桌面与 VNC 服务 |
-| **Windows 10 1809+ / Server 2019+** | 内部版本 **≥ 17763**（ConPTY） | `install.ps1`（管理员；`curl.exe` + `powershell -File`） | 默认 **PowerShell** Shell |
-| **Windows 7 / Server 2012 / Server 2016 等** | 内部版本 **&lt; 17763**（无 ConPTY） | `install.bat`（管理员；纯 **cmd**；控制台「CMD / Win7·Server 2012」） | **CMD + WinPTY**；目标机需自带 **curl.exe** |
+| **Linux** | 常见 amd64/arm64 发行版（systemd 服务） | `curl` 下载二进制 + `woops-agent install` | 原生 PTY Shell（bash/sh）；VNC 需目标机有桌面与 VNC 服务 |
+| **Windows 10 1809+ / Server 2019+** | 内部版本 **≥ 17763**（ConPTY） | 同上（管理员；`curl.exe`） | 默认 **PowerShell** Shell |
+| **Windows 7 / Server 2012 / Server 2016 等** | 内部版本 **&lt; 17763**（无 ConPTY） | 同上（管理员；纯 **cmd** 语法；控制台「CMD / Win7·Server 2012」） | **CMD + WinPTY**；目标机需自带 **curl.exe** |
 | **Windows 通用** | 上述各代 | 均需能 HTTPS 访问 Gateway（自签用 SPKI pin） | 注册 Windows 服务 `woops-agent`；配置在 `%ProgramData%\woops-agent\` |
 
 更细的行为（在线更新、WinPTY 下载、legacy 一键更新等）见 [`FEATURES.md`](./FEATURES.md) §4。
@@ -250,13 +250,13 @@ npm run dev
 
 #### 方法 1 — 控制台安装码（推荐）
 
-1. 本机 **Gateway + control-api** 已按 §3 跑着，且 §1.5 的 pin 已写入 `.env`（安装脚本/Agent 靠 pin 校验证书）。
+1. 本机 **Gateway + control-api** 已按 §3 跑着，且 §1.5 的 pin 已写入 `.env`（安装命令/Agent 靠 pin 校验证书）。
 2. 打开控制台 → **资产** → 左侧先选中目标**分组**（选「全部」不能发码）→ **生成安装链接**。
-3. 在弹窗复制对应系统的命令，到目标机执行：
-   - **Linux**：`curl … | bash`
-   - **Windows（Win10 / Server 2019+）**：`curl.exe` 下载 `install.ps1` 再 `powershell -File …`（须管理员）
-   - **Windows（Win7 / Server 2012 等）**：第三条 **CMD** 命令，下载 `install.bat` 后执行（须管理员；须 **curl.exe**）
-4. 安装码约 **15 分钟**有效、期内可多次用；过期重新生成。脚本会下载 Agent、向 Gateway 注册，并落盘服务（Linux 优先 `/usr/local/bin/woops-agent`，Windows 服务名 `woops-agent`）。
+3. 在弹窗复制对应系统的命令，到目标机执行（均先 `curl` 下载 Agent 二进制，再 `woops-agent install`）：
+   - **Linux**：带 `--compressed` 的 curl + `install -gateway -code -pin`
+   - **Windows（Win10 / Server 2019+）**：PowerShell 语法（须管理员；须 **curl.exe**）
+   - **Windows（Win7 / Server 2012 等）**：第三条 **CMD** 命令（须管理员；须 **curl.exe**）
+4. 安装码约 **15 分钟**有效、期内可多次用；过期重新生成。命令会下载 Agent、向 Gateway 注册，并落盘服务（Linux 优先 `/usr/local/bin/woops-agent`，Windows 服务名 `woops-agent`）。
 5. 控制台资产列表出现该主机且为「在线」即成功。重装会保留 `asset-id`、轮换 `agent-token`。
 
 **离线 / Bridge / 手工控步骤**：见 [`docs/agent-manual-install.md`](./docs/agent-manual-install.md)（从 Gateway Docker 拷二进制、写 `agent.yaml` / `install-code`、systemd、查日志）。

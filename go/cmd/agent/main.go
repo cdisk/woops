@@ -11,6 +11,10 @@ import (
 var Version = "dev"
 
 func main() {
+	if maybeInstallCommand() {
+		runInstallCommand()
+		return
+	}
 	cfgPath := flag.String("config", "", "path to agent.yaml")
 	showVersion := flag.Bool("version", false, "print agent version and exit")
 	flag.Parse()
