@@ -111,7 +111,7 @@ cp .env.example .env          # Windows: copy .env.example .env
 #   OPS_CONTROL_PUBLIC_HTTP=http://<同上>:9100
 # 生产务必改 OPS_JWT_SECRET / OPS_TICKET_SECRET / 管理员密码
 
-# 3. 拉镜像并启动（默认标签 0.1.10；可改 WOOPS_IMAGE_TAG=latest）
+# 3. 拉镜像并启动（默认标签 0.1.11；可改 WOOPS_IMAGE_TAG=latest）
 #    若 deploy/tls/ 尚无证书，compose 的 tls-init 会按 .env 里 PUBLIC 地址自签，
 #    并把匹配的 SPKI pin 写入 deploy/compose-pin.env（覆盖 .env 里空/旧 pin）
 docker compose --env-file .env --profile full --profile desktop up -d

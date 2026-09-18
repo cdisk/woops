@@ -29,9 +29,12 @@ class InstallCommandPinTest {
         String hex = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
         String b64 = Base64.getEncoder().encodeToString(HexFormat.of().parseHex(hex));
         String cmd = AgentService.buildLinuxInstallCurl(GW, CODE, hex);
-        assertTrue(cmd.contains("-k --pinnedpubkey sha256//" + b64));
+        assertTrue(cmd.contains("--pinnedpubkey sha256//" + b64));
         assertTrue(cmd.contains(" -pin " + hex));
         assertTrue(cmd.contains("--compressed"));
+        // CentOS 6 curl lacks --pinnedpubkey; command must probe and fall back to -k.
+        assertTrue(cmd.contains("curl --help 2>&1 | grep -q -- '--pinnedpubkey'"));
+        assertTrue(cmd.contains("curl has no --pinnedpubkey"));
     }
 
     @Test

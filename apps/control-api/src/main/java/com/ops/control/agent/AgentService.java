@@ -446,20 +446,26 @@ public class AgentService {
     /**
      * Console one-liner: download the agent binary (TLS pin on the binary itself), then run
      * {@code woops-agent install}. Architecture is probed inline so amd64/arm64 share one command.
-     * With pin: {@code -k --pinnedpubkey} — curl still verifies CA first, so self-signed needs
-     * {@code -k}; pin remains enforced.
+     * With pin: prefer {@code -k --pinnedpubkey}; CentOS 6 / curl &lt; 7.39 lack that flag, so the
+     * command falls back to {@code -k} only after detecting support (still better than failing).
      */
     static String buildLinuxInstallCurl(String gatewayBase, String code, String pinHex) {
         String url = gatewayBase + "/i/" + code
                 + "/agent/linux/$(uname -m | sed -e s/x86_64/amd64/ -e s/aarch64/arm64/)";
-        String curl;
+        String download;
         if (pinHex == null || pinHex.isBlank()) {
-            curl = "curl -fsSL --compressed -o /tmp/woops-agent \"" + url + "\"";
+            download = "curl -fsSL --compressed -o /tmp/woops-agent \"" + url + "\"";
         } else {
             String pinned = "sha256//" + Base64.getEncoder().encodeToString(HexFormat.of().parseHex(pinHex));
-            curl = "curl -fsSL -k --pinnedpubkey " + pinned + " --compressed -o /tmp/woops-agent \"" + url + "\"";
+            // Old curl (CentOS 6) rejects unknown --pinnedpubkey before any transfer.
+            download = "if curl --help 2>&1 | grep -q -- '--pinnedpubkey'; then "
+                    + "curl -fsSL -k --pinnedpubkey " + pinned + " --compressed -o /tmp/woops-agent \"" + url + "\"; "
+                    + "else "
+                    + "echo '==> WARNING: curl has no --pinnedpubkey (need curl>=7.39); downloading with -k only'; "
+                    + "curl -fsSL -k --compressed -o /tmp/woops-agent \"" + url + "\"; "
+                    + "fi";
         }
-        return curl + " && chmod +x /tmp/woops-agent && /tmp/woops-agent " + installArgs(gatewayBase, code, pinHex);
+        return download + " && chmod +x /tmp/woops-agent && /tmp/woops-agent " + installArgs(gatewayBase, code, pinHex);
     }
 
     /**
