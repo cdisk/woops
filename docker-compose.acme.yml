@@ -1,0 +1,17 @@
+# Console-only public CA certificate overlay.
+#
+# Issue/install the certificate first:
+#   DOMAIN=console.example.com bash deploy/acme/issue-console-cert.sh
+#
+# Start with:
+#   docker compose -f docker-compose.yml -f docker-compose.acme.yml \
+#     --env-file .env --profile full --profile desktop up -d
+#
+# Gateway keeps deploy/tls/gateway.{crt,key} and its existing SPKI pin. This
+# avoids disconnecting Agents when the browser-facing Console certificate is
+# first switched from self-signed TLS to ACME.
+services:
+  console:
+    volumes:
+      - ./deploy/acme/console.crt:/tls/gateway.crt:ro
+      - ./deploy/acme/console.key:/tls/gateway.key:ro

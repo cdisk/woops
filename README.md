@@ -121,11 +121,25 @@ docker compose --env-file .env --profile full --profile desktop up -d
 
 **证书说明：** 首次 `up` 前请把 `.env` 的 `OPS_*_PUBLIC_*` 改成实际访问的 IP/域名（自签 SAN 来自这些 URL）。已有公有 CA 或要自定义 SAN 时，可先跑 [`deploy/gen-gateway-tls.sh`](./deploy/gen-gateway-tls.sh) 再 `up`（已有 `gateway.crt`/`gateway.key` 则不会覆盖）。换域名后若浏览器/Agent 校验证书失败，删掉 `deploy/tls/gateway.*` 再 `up` 即可重签。
 
+**浏览器免警告 + ACME 自动续期：** 有公网域名且 TCP 80/443 可达时，可让 Console 单独使用 Let's Encrypt 证书，Gateway 继续使用原证书与 SPKI pin，切换时不会导致已安装 Agent 掉线。宿主机先安装 `socat`、`cron`（Debian/Ubuntu：`apt-get install -y socat cron`），然后：
+
+```bash
+DOMAIN=console.example.com ACME_EMAIL=admin@example.com \
+  bash deploy/acme/issue-console-cert.sh
+
+docker compose -f docker-compose.yml -f docker-compose.acme.yml \
+  --env-file .env --profile full --profile desktop \
+  up -d --force-recreate --no-deps console
+```
+
+脚本使用 acme.sh standalone HTTP-01 临时监听 80，证书写入已忽略提交的 `deploy/acme/`，并安装自动续期 cron；续期成功后只重启 Console。后续启动均带上 `-f docker-compose.acme.yml`。若要让 Gateway `:9200` 也改用公有 CA，须先迁移现有 Agent 的 pin，再按 `OPS_TLS_TRUSTED_CA=1` 模式操作。
+
 镜像仓库：[`cdisk/woops-console`](https://hub.docker.com/r/cdisk/woops-console)、[`cdisk/woops-control-api`](https://hub.docker.com/r/cdisk/woops-control-api)、[`cdisk/woops-gateway`](https://hub.docker.com/r/cdisk/woops-gateway)。
 
 | 文件 | 用途 |
 |------|------|
 | 根目录 [`docker-compose.yml`](./docker-compose.yml) | **拉 Hub 镜像**部署（本小节） |
+| [`docker-compose.acme.yml`](./docker-compose.acme.yml) | Console 单独挂载 ACME 公有证书（保留 Gateway/Agent pin） |
 | [`deploy/docker-compose.yml`](./deploy/docker-compose.yml) | **本机构建**镜像（开发 / 改 Dockerfile 时） |
 
 生产服务器也可把仓库放到 `/opt/ops`，`.env` 参考 [`deploy/env.prod.example`](./deploy/env.prod.example)，证书放 `deploy/tls/`（勿提交）。
