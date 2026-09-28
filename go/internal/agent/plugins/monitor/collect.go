@@ -84,6 +84,7 @@ func Collect() []monitorproto.Point {
 			out = append(out, point("cpu.idle_percent", "", 100*t.Idle/total))
 			if runtime.GOOS != "windows" {
 				out = append(out, point("cpu.iowait_percent", "", 100*t.Iowait/total))
+				out = append(out, point("cpu.steal_percent", "", 100*t.Steal/total))
 			}
 		}
 	}

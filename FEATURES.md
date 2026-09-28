@@ -4,7 +4,7 @@
 > 任何功能新增、完成、搁置、行为变更，都必须先读本文件，并在同一变更中更新对应条目的状态与说明。  
 > README 只保留快速启动。历史设计稿 `bastion_architecture_design_*.plan.md` 不必再读。
 
-**最后更新：** 2026-09-22（镜像 Compose 增加 Console 独立 ACME 证书叠加层与自动续期，避免切换浏览器证书时影响现有 SPKI-pinned Agent）
+**最后更新：** 2026-09-28（监控项增加 Linux `cpu.steal_percent`，与 iowait 同为非 Windows 采集）
 
 ---
 
@@ -122,7 +122,7 @@
 | `[x]` | 控制 WSS | 在线（带 `sourceIp`）、ping、`open_session`、`netinfo`（**仅内网 IP**，不含公网、**不含** metrics）；`ctx` 取消时关闭 WS，避免 `ReadMessage` 卡满读超时（曾致 `systemctl stop` 约 60–90s）；Agent 对 Gateway Ping 用 `PingHandler` 续期 90s 读超时（仅 `PongHandler` 时曾约 90s 周期断连）；**重连前重读** `agent-token`/`asset-id`（一键更新 register 轮换 token 后，旧进程不致永久 `bad handshake`）；**拨号失败** 1s 起指数退避至 30s（带抖动，`control connect retry`）；**曾连上后断开** 重置为 1s 再拨（`control ended`） |
 | `[x]` | 一会话一数据 WSS | TCP binary chunk ≈ io.Copy；**协议层 Ping/Pong keepalive**（Gateway 对 browser+agent 两侧每 25s Ping、90s 无 Pong/数据则读超时关闭并 `auditEnd`；与 Text/Binary 业务帧分离，无新信令）。Shell 的 Agent 侧同超时续期；filemanager/exec/filetransfer 仅靠 Gateway 探测（避免长写无读误杀） |
 | `[x]` | `protocol_version` / Envelope | `internal/protocol/control`；未知类型忽略；`open_session` **仅**嵌套 `params`（`ShellParams`/`FileTransferParams`/`TunnelParams`）；`netinfo` 仅 `privateIp` CSV；**已移除**平铺字段双写/回退与 `privateIps` 数组双发。golden：`internal/protocol/control/testdata/open_session/` |
-| `[x]` | 监控插件 · 独立 metrics WSS | `/ws/agent/metrics`；`agent/plugins/monitor` + `gateway/plugins/monitor`；默认 60s；`metrics.enabled` 可关；断线不标离线；网卡与 `core/netinfo` 共用 `hostinfo/netiface` 真实网卡过滤；磁盘容量排除光驱（`iso9660`/`udf`/`cdfs`；Windows 另 `GetDriveType`=`DRIVE_CDROM`）；Gateway 对 Agent Ping 用 `PingHandler` 续期 120s 读超时（曾约 120s 周期 1006） |
+| `[x]` | 监控插件 · 独立 metrics WSS | `/ws/agent/metrics`；`agent/plugins/monitor` + `gateway/plugins/monitor`；默认 60s；`metrics.enabled` 可关；断线不标离线；网卡与 `core/netinfo` 共用 `hostinfo/netiface` 真实网卡过滤；磁盘容量排除光驱（`iso9660`/`udf`/`cdfs`；Windows 另 `GetDriveType`=`DRIVE_CDROM`）；Gateway 对 Agent Ping 用 `PingHandler` 续期 120s 读超时（曾约 120s 周期 1006）。CPU 分解含 `cpu.steal_percent`（与 `cpu.iowait_percent` 同：仅 Linux 上报，不进默认图表） |
 | `[x]` | 监控 Timescale history + trends | **`monitor_history`**（分钟明细 hypertable，近 **7** 天可配）+ **`monitor_trends`**（小时 `min/max/avg/sample_count`，保留 **3** 年可配）；字典 `monitor_item_def`；每小时汇集上一小时并删除超期明细；压缩策略由启动引导自动加；旧表名 `monitor_data` 已迁完。**查询索引** `idx_monitor_history_series`（`asset_id,item_id,time,instance`）由 `MetricsIndexMigrator` 启动时后台建、按 advisory lock 去重、每次启动幂等重试：**hypertable 上必须用 `WITH (timescaledb.transaction_per_chunk)`**，`CREATE INDEX CONCURRENTLY` 会被 TimescaleDB 拒绝（`hypertables do not support concurrent index creation`，SQLSTATE `0A000` 还会让 Hikari 弃掉该连接）；仅未转换的普通表才走 CONCURRENTLY |
 | `[x]` | 监控曲线 / 聚合 | `GET …/metrics/series`；grain=minute\|hour\|day\|month；选表：起点在明细保留窗内且跨度≤保留窗 → history，否则 trends（跨边界混合未汇总 history）；trends **按 `sample_count` 加权平均**；响应含服务端 `summaries`（min/avg/max/sampleCount，不随显示粒度变；断线缺口不进均值分母）；磁盘/网卡按 instance 拆分。控制台曲线页直接展示该 summary |
 | `[x]` | 指标统计报表 API | `POST /api/reports/metrics`：单资产、多 `itemId`、`[from,to)`、`hour\|day` 等粒度；一次返回区间统计 + 趋势 `points`（`time`/`value`/`min`/`max`，由调用方绘图）；JWT 或 `metrics:read` API Token；控制审计 `MONITOR`/`REPORT_READ`（不记 points/secret）。调用示例 [`docs/metrics-report-api.md`](docs/metrics-report-api.md) |

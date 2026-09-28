@@ -638,6 +638,7 @@ export default {
     cpu_system_percent: 'CPU System%',
     cpu_idle_percent: 'CPU Idle%',
     cpu_iowait_percent: 'CPU Iowait%',
+    cpu_steal_percent: 'CPU Steal%',
     cpu_count_logical: '逻辑 CPU 数',
     cpu_count_physical: '物理 CPU 数',
     cpu_mhz: 'CPU 频率',

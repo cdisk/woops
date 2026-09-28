@@ -38,6 +38,7 @@ public class MetricsBootstrap implements ApplicationRunner {
                 new Def("cpu.system_percent", "CPU system", "percent", false),
                 new Def("cpu.idle_percent", "CPU idle", "percent", false),
                 new Def("cpu.iowait_percent", "CPU iowait", "percent", false),
+                new Def("cpu.steal_percent", "CPU steal", "percent", false),
                 new Def("cpu.count_logical", "Logical CPUs", "count", false),
                 new Def("cpu.count_physical", "Physical CPUs", "count", false),
                 new Def("cpu.mhz", "CPU frequency", "mhz", false),

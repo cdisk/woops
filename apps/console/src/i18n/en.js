@@ -654,6 +654,7 @@ export default {
     cpu_system_percent: 'CPU system',
     cpu_idle_percent: 'CPU idle',
     cpu_iowait_percent: 'CPU iowait',
+    cpu_steal_percent: 'CPU steal',
     cpu_count_logical: 'Logical CPUs',
     cpu_count_physical: 'Physical CPUs',
     cpu_mhz: 'CPU frequency',
