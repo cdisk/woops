@@ -301,9 +301,10 @@ async function withPanelLoading(task) {
   }
 }
 
-/** Display order: CPU → mem → disk → Load → Swap → nic rx/tx */
+/** Display order: CPU → steal → mem → disk → Load → Swap → nic rx/tx */
 const CHART_ORDER = [
   'cpu.usage_percent',
+  'cpu.steal_percent',
   'mem.used_percent',
   'disk.used_percent',
   'load.load1',
