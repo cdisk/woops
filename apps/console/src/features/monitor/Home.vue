@@ -46,6 +46,14 @@
               <span v-else>{{ t('common.ungrouped') }}</span>
             </template>
           </el-table-column>
+          <el-table-column :label="t('assets.ipCol')" min-width="120" show-overflow-tooltip>
+            <template #default="{ row }">
+              <div class="stack-cell">
+                <div class="stack-primary">{{ row.privateIp || t('common.emDash') }}</div>
+                <div class="stack-secondary">{{ row.publicIp || t('common.emDash') }}</div>
+              </div>
+            </template>
+          </el-table-column>
           <el-table-column :label="t('common.status')" width="90">
             <template #default="{ row }">
               <el-tag :type="row.online ? 'success' : 'info'" size="small">{{ row.online ? t('common.online') : t('common.offline') }}</el-tag>

@@ -4,7 +4,7 @@
 > 任何功能新增、完成、搁置、行为变更，都必须先读本文件，并在同一变更中更新对应条目的状态与说明。  
 > README 只保留快速启动。历史设计稿 `bastion_architecture_design_*.plan.md` 不必再读。
 
-**最后更新：** 2026-09-28（资产监控页默认曲线增加 `cpu.steal_percent`）
+**最后更新：** 2026-10-12（首页异常资产列表增加 IP 列）
 
 ---
 
@@ -127,7 +127,7 @@
 | `[x]` | 监控曲线 / 聚合 | `GET …/metrics/series`；grain=minute\|hour\|day\|month；选表：起点在明细保留窗内且跨度≤保留窗 → history，否则 trends（跨边界混合未汇总 history）；trends **按 `sample_count` 加权平均**；响应含服务端 `summaries`（min/avg/max/sampleCount，不随显示粒度变；断线缺口不进均值分母）；磁盘/网卡按 instance 拆分。控制台曲线页直接展示该 summary |
 | `[x]` | 指标统计报表 API | `POST /api/reports/metrics`：单资产、多 `itemId`、`[from,to)`、`hour\|day` 等粒度；一次返回区间统计 + 趋势 `points`（`time`/`value`/`min`/`max`，由调用方绘图）；JWT 或 `metrics:read` API Token；控制审计 `MONITOR`/`REPORT_READ`（不记 points/secret）。调用示例 [`docs/metrics-report-api.md`](docs/metrics-report-api.md) |
 | `[x]` | 监控预警 | 全局阈值（优先 %）；入库评估；`asset_alert_status`；配置 CRUD；**仅超管**可见菜单与 API。首页异常含离线；忽略按 **资产+监控项**（`asset_alert_ignores`，离线项 `host.online`） |
-| `[x]` | 首页概览 | 资产总数 / 在线 / 异常（**含离线**，与监控预警并列）；登录进首页。异常按监控项可 **忽略 / 取消忽略**（如只忽略离线或 CPU，不影响该资产其他项；忽略后不占异常列表；「异常资产」标题右侧打开已忽略弹窗 `IgnoredAlertsDialog`；可见资产即可操作；控制审计 `MONITOR`/`IGNORE`/`UNIGNORE`）。异常列表与已忽略清单均展示 **分组**（`groupId`/`groupName`，未分组显示「未分组」；已忽略弹窗加宽）；**名称+主机名**合成一列两行（名称可点 → `/assets?q=`；主机名小灰字）；**分组**可点 → `/assets?groupId=`（左侧树选中该组；未分组不可点） |
+| `[x]` | 首页概览 | 资产总数 / 在线 / 异常（**含离线**，与监控预警并列）；登录进首页。异常按监控项可 **忽略 / 取消忽略**（如只忽略离线或 CPU，不影响该资产其他项；忽略后不占异常列表；「异常资产」标题右侧打开已忽略弹窗 `IgnoredAlertsDialog`；可见资产即可操作；控制审计 `MONITOR`/`IGNORE`/`UNIGNORE`）。异常列表与已忽略清单均展示 **分组**（`groupId`/`groupName`，未分组显示「未分组」；已忽略弹窗加宽）；**名称+主机名**合成一列两行（名称可点 → `/assets?q=`；主机名小灰字）；**IP** 列两行（内网主、公网次，同资产列表）；**分组**可点 → `/assets?groupId=`（左侧树选中该组；未分组不可点） |
 | `[x]` | 资产监控页 | 操作「监控」→ 新浏览器标签 `/assets/:id/monitor`（无侧栏，同会话页）；复用 `AssetMonitorPanel`；顶部规格；各图下最高/平均/最低；默认曲线含 `cpu.usage_percent` / `cpu.steal_percent` / mem / disk / load / swap / net rx·tx；时间范围快捷：5 分钟 / 30 分钟 / 1 小时 / 6 小时 / 1 天 / 7 天 / 30 天 / 90 天 / 1 年；图表横向框选时间后按该范围重载全部曲线并自适应 grain；标题左侧关闭（有 opener 则关标签）；首屏 items/latest/series 并行加载，ECharts 按需打包 |
 | `[~]` | 资产列表指标摘要 | 已做异常条数 tag（见上「资产列表」监控列，数据来自 dashboard summary）；完整 `monitor_latest` 指标数值摘要未做 |
 | `[x]` | Agent 内置 HTTP 正向代理 | 插件式 `go/internal/agent/plugins/proxy`：`TryStart` 软失败不影响控制面；`agent.yaml` `proxy.*`（enabled/listen/username/password/allowCIDRs/allowGlobal）；CONNECT + forward；账密强制；来源 CIDR；`allowGlobal=false` 仅 ops host（`gateway` 主机 :gwPort+`:9100`）；全局时拒 loopback/元数据；**有 `gatewayProxy` 时入站出站经上游 CONNECT/forward 串联**（防环：拒连上游自身） |

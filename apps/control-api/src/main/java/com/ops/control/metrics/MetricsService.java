@@ -796,6 +796,8 @@ public class MetricsService {
         m.put("displayName", a.getDisplayName() != null ? a.getDisplayName() : a.getId().toString());
         m.put("hostname", a.getHostname() != null ? a.getHostname() : "");
         putGroupFields(m, a, groupNames);
+        m.put("publicIp", a.getPublicIp() == null ? "" : a.getPublicIp());
+        m.put("privateIp", a.getPrivateIp() == null ? "" : a.getPrivateIp());
         m.put("online", a.isOnline());
         m.put("summary", String.join("; ", labels));
         m.put("issues", issueViews);
