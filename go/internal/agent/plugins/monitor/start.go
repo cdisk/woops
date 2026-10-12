@@ -88,10 +88,11 @@ func runOnce(ctx context.Context, cfg Config) error {
 
 	var writeMu sync.Mutex
 	send := func() error {
-		points := Collect()
+		sample := Collect()
 		msg, err := monitorproto.Marshal("points", "", monitorproto.PointsPayload{
-			CollectedAt: time.Now().UTC().Format(time.RFC3339),
-			Points:      points,
+			CollectedAt:      time.Now().UTC().Format(time.RFC3339),
+			Points:           sample.Points,
+			CompleteFamilies: sample.CompleteFamilies,
 		})
 		if err != nil {
 			return err

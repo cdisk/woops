@@ -11,9 +11,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class AlertIssueLogicTest {
 
     private static final AlertIssueLogic.Rule CPU = new AlertIssueLogic.Rule(
-            "CPU high", "cpu.usage_percent", "", "gt", 90);
+            null, "CPU high", "cpu.usage_percent", "", "gt", 90);
     private static final AlertIssueLogic.Rule MEM = new AlertIssueLogic.Rule(
-            "Mem high", "mem.used_percent", "", "gt", 90);
+            null, "Mem high", "mem.used_percent", "", "gt", 90);
 
     @Test
     void offlineIsAbnormalUnlessIgnored() {
@@ -45,5 +45,15 @@ class AlertIssueLogicTest {
     @Test
     void onlineWithoutHitsIsNotAbnormal() {
         assertTrue(AlertIssueLogic.visibleIssues(true, List.of(), Set.of()).isEmpty());
+    }
+
+    @Test
+    void actualIssuesIgnoreOfflineMetricHits() {
+        List<AlertIssueLogic.Issue> hits = AlertIssueLogic.metricHits(
+                List.of(new AlertIssueLogic.Point("cpu.usage_percent", "", 99)),
+                List.of(CPU));
+        List<AlertIssueLogic.Issue> actual = AlertIssueLogic.actualIssues(false, hits);
+        assertEquals(1, actual.size());
+        assertEquals(AlertIssueLogic.KIND_OFFLINE, actual.get(0).kind());
     }
 }

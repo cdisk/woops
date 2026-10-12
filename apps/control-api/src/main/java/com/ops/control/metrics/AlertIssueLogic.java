@@ -4,21 +4,31 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * Dashboard abnormality: metric-rule hits plus offline.
  * Ignore is per asset + monitor itemId (offline uses {@link #ITEM_HOST_ONLINE}).
  */
-final class AlertIssueLogic {
+public final class AlertIssueLogic {
     static final String ITEM_HOST_ONLINE = "host.online";
     static final String KIND_OFFLINE = "offline";
     static final String KIND_METRIC = "metric";
 
-    record Point(String itemId, String instance, double value) {}
+    public record Point(String itemId, String instance, double value) {}
 
-    record Rule(String name, String itemId, String instance, String op, double threshold) {}
+    public record Rule(UUID id, String name, String itemId, String instance, String op, double threshold) {}
 
-    record Issue(String itemId, String kind, String label, String instance) {}
+    public record Issue(
+            String itemId,
+            String kind,
+            String label,
+            String instance,
+            double value,
+            UUID ruleId,
+            String ruleName,
+            String op,
+            Double threshold) {}
 
     private AlertIssueLogic() {}
 
@@ -44,10 +54,24 @@ final class AlertIssueLogic {
                 if (!inst.isEmpty()) {
                     label = label + " (" + inst + ")";
                 }
-                hits.add(new Issue(p.itemId(), KIND_METRIC, label + "=" + formatNum(p.value()), inst));
+                hits.add(new Issue(
+                        p.itemId(),
+                        KIND_METRIC,
+                        label + "=" + formatNum(p.value()),
+                        inst,
+                        p.value(),
+                        rule.id(),
+                        rule.name() == null ? "" : rule.name(),
+                        rule.op() == null ? "gt" : rule.op(),
+                        rule.threshold()));
             }
         }
         return hits;
+    }
+
+    /** Objective issues: ignore is not applied. Offline assets only expose host.online. */
+    static List<Issue> actualIssues(boolean online, List<Issue> metricHits) {
+        return visibleIssues(online, metricHits, Set.of());
     }
 
     /**
@@ -60,12 +84,16 @@ final class AlertIssueLogic {
             if (ignored.contains(ITEM_HOST_ONLINE)) {
                 return List.of();
             }
-            return List.of(new Issue(ITEM_HOST_ONLINE, KIND_OFFLINE, "", ""));
+            return List.of(offlineIssue());
         }
         if (metricHits == null || metricHits.isEmpty()) {
             return List.of();
         }
         return metricHits.stream().filter(h -> !ignored.contains(h.itemId())).toList();
+    }
+
+    static Issue offlineIssue() {
+        return new Issue(ITEM_HOST_ONLINE, KIND_OFFLINE, "", "", 0, null, "", "", null);
     }
 
     static boolean matches(String op, double value, double threshold) {
@@ -86,5 +114,15 @@ final class AlertIssueLogic {
 
     static String kindOf(String itemId) {
         return ITEM_HOST_ONLINE.equals(itemId) ? KIND_OFFLINE : KIND_METRIC;
+    }
+
+    static String issueKey(Issue issue) {
+        return issueKey(issue.itemId(), issue.instance(), issue.ruleId());
+    }
+
+    static String issueKey(String itemId, String instance, UUID ruleId) {
+        String inst = instance == null ? "" : instance;
+        String rule = ruleId == null ? "-" : ruleId.toString();
+        return itemId + "\0" + inst + "\0" + rule;
     }
 }

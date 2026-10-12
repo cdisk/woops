@@ -20,6 +20,10 @@ type Point struct {
 type PointsPayload struct {
 	CollectedAt string  `json:"collectedAt"` // RFC3339
 	Points      []Point `json:"points"`
+	// CompleteFamilies lists metric families whose instances in this batch are a
+	// full snapshot (e.g. "disk", "diskio", "net"). Absent families must not be
+	// treated as instance deletions — a collector may have failed temporarily.
+	CompleteFamilies []string `json:"completeFamilies,omitempty"`
 }
 
 type AckPayload struct {

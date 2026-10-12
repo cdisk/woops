@@ -68,10 +68,11 @@ func Handle(upgrade func(http.ResponseWriter, *http.Request) (*websocket.Conn, e
 					})
 				}
 				body := map[string]any{
-					"assetId":     assetID,
-					"agentToken":  token,
-					"collectedAt": payload.CollectedAt,
-					"points":      points,
+					"assetId":          assetID,
+					"agentToken":       token,
+					"collectedAt":      payload.CollectedAt,
+					"points":           points,
+					"completeFamilies": payload.CompleteFamilies,
 				}
 				if err := post.PostJSON("/api/internal/metrics/ingest", body, nil); err != nil {
 					log.Printf("metrics ingest failed asset=%s: %v", assetID, err)

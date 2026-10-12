@@ -25,12 +25,13 @@ public class MetricsService {
     private final MonitorLatestRepository latestRepo;
     private final MonitorItemDefRepository itemDefs;
     private final MetricAlertRuleRepository rules;
-    private final AssetAlertStatusRepository alertStatus;
     private final AssetAlertIgnoreRepository alertIgnores;
     private final ControlAuditService audit;
     private final GroupService groups;
     private final JdbcTemplate jdbc;
     private final MonitorProperties monitor;
+    private final AlertEvaluationService alertEval;
+    private final AlertIncidentRepository incidents;
 
     public MetricsService(
             AgentService agents,
@@ -40,12 +41,13 @@ public class MetricsService {
             MonitorLatestRepository latestRepo,
             MonitorItemDefRepository itemDefs,
             MetricAlertRuleRepository rules,
-            AssetAlertStatusRepository alertStatus,
             AssetAlertIgnoreRepository alertIgnores,
             ControlAuditService audit,
             GroupService groups,
             JdbcTemplate jdbc,
-            MonitorProperties monitor) {
+            MonitorProperties monitor,
+            AlertEvaluationService alertEval,
+            AlertIncidentRepository incidents) {
         this.agents = agents;
         this.assets = assets;
         this.dataRepo = dataRepo;
@@ -53,18 +55,24 @@ public class MetricsService {
         this.latestRepo = latestRepo;
         this.itemDefs = itemDefs;
         this.rules = rules;
-        this.alertStatus = alertStatus;
         this.alertIgnores = alertIgnores;
         this.audit = audit;
         this.groups = groups;
         this.jdbc = jdbc;
         this.monitor = monitor;
+        this.alertEval = alertEval;
+        this.incidents = incidents;
     }
 
     public record PointIn(String itemId, String instance, double value) {}
 
     @Transactional
-    public void ingest(String assetIdStr, String agentToken, String collectedAt, List<PointIn> points) {
+    public void ingest(
+            String assetIdStr,
+            String agentToken,
+            String collectedAt,
+            List<PointIn> points,
+            List<String> completeFamilies) {
         AssetEntity asset = agents.authenticateAgent(assetIdStr, agentToken)
                 .orElseThrow(() -> new IllegalArgumentException("invalid agent credentials"));
         Instant ts = parseTime(collectedAt);
@@ -72,6 +80,10 @@ public class MetricsService {
         if (points == null || points.isEmpty()) {
             return;
         }
+
+        List<MonitorLatestEntity> beforeLatest =
+                latestRepo.findByAssetIdOrderByItemIdAscInstanceAsc(assetId);
+        Set<String> goneKeys = MetricFamilyReconcile.goneKeys(points, beforeLatest, completeFamilies);
 
         jdbc.batchUpdate(
                 """
@@ -108,45 +120,15 @@ public class MetricsService {
                     ps.setDouble(5, p.value());
                 });
 
-        evaluateAlerts(assetId, points);
-    }
-
-    private void evaluateAlerts(UUID assetId, List<PointIn> points) {
-        List<MetricAlertRuleEntity> enabled = rules.findByEnabledTrue();
-        if (enabled.isEmpty()) {
-            AssetAlertStatusEntity st = alertStatus.findById(assetId).orElseGet(() -> {
-                AssetAlertStatusEntity n = new AssetAlertStatusEntity();
-                n.setAssetId(assetId);
-                return n;
-            });
-            st.setFiring(false);
-            st.setSummary("");
-            st.setUpdatedAt(Instant.now());
-            alertStatus.save(st);
-            return;
-        }
-        List<String> hits = new ArrayList<>();
-        for (MetricAlertRuleEntity rule : enabled) {
-            for (PointIn p : points) {
-                if (!rule.getItemId().equals(p.itemId())) continue;
-                String inst = p.instance() == null ? "" : p.instance();
-                if (!rule.getInstance().isEmpty() && !rule.getInstance().equals(inst)) continue;
-                if (AlertIssueLogic.matches(rule.getOp(), p.value(), rule.getThreshold())) {
-                    String label = rule.getName();
-                    if (!inst.isEmpty()) label = label + " (" + inst + ")";
-                    hits.add(label + "=" + AlertIssueLogic.formatNum(p.value()));
+        if (!goneKeys.isEmpty()) {
+            for (MonitorLatestEntity row : beforeLatest) {
+                String k = MetricFamilyReconcile.key(row.getItemId(), row.getInstance());
+                if (goneKeys.contains(k)) {
+                    latestRepo.delete(row);
                 }
             }
         }
-        AssetAlertStatusEntity st = alertStatus.findById(assetId).orElseGet(() -> {
-            AssetAlertStatusEntity n = new AssetAlertStatusEntity();
-            n.setAssetId(assetId);
-            return n;
-        });
-        st.setFiring(!hits.isEmpty());
-        st.setSummary(hits.isEmpty() ? "" : String.join("; ", hits.stream().limit(5).toList()));
-        st.setUpdatedAt(Instant.now());
-        alertStatus.save(st);
+        alertEval.recompute(assetId, AlertEvaluationService.RecomputeOptions.gone(goneKeys));
     }
 
     public List<Map<String, Object>> latest(UUID assetId) {
@@ -684,12 +666,23 @@ public class MetricsService {
         }
 
         List<AlertIssueLogic.Rule> enabledRules = rules.findByEnabledTrue().stream()
-                .map(r -> new AlertIssueLogic.Rule(r.getName(), r.getItemId(), r.getInstance(), r.getOp(), r.getThreshold()))
+                .map(r -> new AlertIssueLogic.Rule(
+                        r.getId(), r.getName(), r.getItemId(), r.getInstance(), r.getOp(), r.getThreshold()))
                 .toList();
         Map<UUID, List<AlertIssueLogic.Point>> latestByAsset = new HashMap<>();
         for (MonitorLatestEntity row : latestRepo.findAll()) {
             latestByAsset.computeIfAbsent(row.getAssetId(), k -> new ArrayList<>())
                     .add(new AlertIssueLogic.Point(row.getItemId(), row.getInstance(), row.getValue()));
+        }
+
+        Map<String, Instant> openStartedAt = new HashMap<>();
+        for (AlertIncidentEntity inc : incidents.findByResolvedAtIsNull()) {
+            if (inc.getStartedAt() == null) {
+                continue;
+            }
+            openStartedAt.put(
+                    openIncidentLookupKey(inc.getAssetId(), inc.getItemId(), inc.getInstance(), inc.getRuleId()),
+                    inc.getStartedAt());
         }
 
         Map<UUID, String> groupNames = groups.nameById();
@@ -702,7 +695,7 @@ public class MetricsService {
             if (visible.isEmpty()) {
                 continue;
             }
-            firing.add(abnormalView(a, visible, groupNames));
+            firing.add(abnormalView(a, visible, groupNames, openStartedAt));
         }
         firing.sort(Comparator
                 .comparing((Map<String, Object> m) -> Boolean.TRUE.equals(m.get("online")))
@@ -749,6 +742,8 @@ public class MetricsService {
                     asset.getGroupId(),
                     null,
                     ControlAuditService.jsonDetail(Map.of("itemId", id)));
+            // Refresh actionable summary; do not close objective incidents or send resolved.
+            alertEval.recompute(assetId);
         }
         return ignoreView(asset, row, itemNameMap(), groups.nameById());
     }
@@ -769,11 +764,16 @@ public class MetricsService {
                     asset.getGroupId(),
                     null,
                     ControlAuditService.jsonDetail(Map.of("itemId", id)));
+            alertEval.recompute(assetId);
+            alertEval.notifyOpenAfterUnignore(assetId, id);
         }
     }
 
     private Map<String, Object> abnormalView(
-            AssetEntity a, List<AlertIssueLogic.Issue> issues, Map<UUID, String> groupNames) {
+            AssetEntity a,
+            List<AlertIssueLogic.Issue> issues,
+            Map<UUID, String> groupNames,
+            Map<String, Instant> openStartedAt) {
         List<Map<String, Object>> issueViews = new ArrayList<>();
         List<String> labels = new ArrayList<>();
         for (AlertIssueLogic.Issue issue : issues) {
@@ -782,6 +782,12 @@ public class MetricsService {
             m.put("kind", issue.kind());
             m.put("label", issue.label());
             m.put("instance", issue.instance());
+            Instant started = openStartedAt == null
+                    ? null
+                    : openStartedAt.get(openIncidentLookupKey(a.getId(), issue.itemId(), issue.instance(), issue.ruleId()));
+            if (started != null) {
+                m.put("startedAt", started.toString());
+            }
             issueViews.add(m);
             if (AlertIssueLogic.KIND_OFFLINE.equals(issue.kind())) {
                 labels.add("offline");
@@ -822,6 +828,11 @@ public class MetricsService {
     private static void putGroupFields(Map<String, Object> m, AssetEntity a, Map<UUID, String> groupNames) {
         m.put("groupId", a.getGroupId() == null ? null : a.getGroupId().toString());
         m.put("groupName", a.getGroupId() == null ? "" : groupNames.getOrDefault(a.getGroupId(), ""));
+    }
+
+    /** Lookup key aligned with open incidents for dashboard duration. */
+    private static String openIncidentLookupKey(UUID assetId, String itemId, String instance, UUID ruleId) {
+        return assetId + "\0" + AlertIssueLogic.issueKey(itemId, instance, ruleId);
     }
 
     private Map<String, String> itemNameMap() {
@@ -871,12 +882,17 @@ public class MetricsService {
         r.setEnabled(enabled == null || enabled);
         r.setCreatedAt(Instant.now());
         r.setUpdatedAt(Instant.now());
-        return ruleView(rules.save(r));
+        Map<String, Object> view = ruleView(rules.save(r));
+        for (AssetEntity a : assets.findAll()) {
+            alertEval.recompute(a.getId());
+        }
+        return view;
     }
 
     @Transactional
     public Map<String, Object> updateRule(UUID id, String name, String itemId, String instance, String op, Double threshold, Boolean enabled) {
         MetricAlertRuleEntity r = rules.findById(id).orElseThrow(() -> new IllegalArgumentException("rule not found"));
+        boolean wasEnabled = r.isEnabled();
         if (name != null && !name.isBlank()) r.setName(name);
         if (itemId != null && !itemId.isBlank()) r.setItemId(itemId);
         if (instance != null) r.setInstance(instance);
@@ -884,11 +900,23 @@ public class MetricsService {
         if (threshold != null) r.setThreshold(threshold);
         if (enabled != null) r.setEnabled(enabled);
         r.setUpdatedAt(Instant.now());
-        return ruleView(rules.save(r));
+        MetricAlertRuleEntity saved = rules.save(r);
+        if (wasEnabled && !saved.isEnabled()) {
+            alertEval.resolveForRuleChange(id);
+        } else {
+            for (AssetEntity a : assets.findAll()) {
+                alertEval.recompute(a.getId());
+            }
+        }
+        return ruleView(saved);
     }
 
     @Transactional
     public void deleteRule(UUID id) {
+        if (!rules.existsById(id)) {
+            return;
+        }
+        alertEval.resolveForRuleChange(id);
         rules.deleteById(id);
     }
 

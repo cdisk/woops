@@ -5,6 +5,7 @@ import com.ops.control.apitoken.ApiTokenAuth;
 import com.ops.control.asset.AssetEntity;
 import com.ops.control.asset.AssetRepository;
 import com.ops.control.controlaudit.ControlAuditService;
+import com.ops.control.metrics.notify.AlertNotifyService;
 import com.ops.control.user.UserEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -21,16 +22,22 @@ public class MetricsController {
     private final AccessService access;
     private final AssetRepository assets;
     private final ControlAuditService audit;
+    private final AlertEvaluationService alertEval;
+    private final AlertNotifyService notify;
 
     public MetricsController(
             MetricsService metrics,
             AccessService access,
             AssetRepository assets,
-            ControlAuditService audit) {
+            ControlAuditService audit,
+            AlertEvaluationService alertEval,
+            AlertNotifyService notify) {
         this.metrics = metrics;
         this.access = access;
         this.assets = assets;
         this.audit = audit;
+        this.alertEval = alertEval;
+        this.notify = notify;
     }
 
     @GetMapping("/dashboard/summary")
@@ -218,6 +225,75 @@ public class MetricsController {
         access.assertCanManageAlertRules(access.requireUser(auth));
         metrics.deleteRule(id);
         return Map.of("status", "deleted");
+    }
+
+    @GetMapping("/monitor/alert-incidents")
+    public Map<String, Object> listIncidents(
+            @RequestParam(required = false) UUID assetId,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String from,
+            @RequestParam(required = false) String to,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "50") int pageSize,
+            Authentication auth) {
+        UserEntity user = access.requireUser(auth);
+        boolean superAdmin = access.isSuperAdmin(user);
+        Set<UUID> visible = superAdmin ? Set.of() : access.visibleAssetIds(user);
+        Instant fromTs = from == null || from.isBlank() ? null : parseOr(from, null);
+        Instant toTs = to == null || to.isBlank() ? null : parseOr(to, null);
+        return alertEval.listIncidents(
+                user, superAdmin, visible, assetId, status, fromTs, toTs, page, pageSize);
+    }
+
+    @GetMapping("/monitor/notify/webhooks")
+    public List<Map<String, Object>> listWebhooks(Authentication auth) {
+        access.assertCanManageAlertRules(access.requireUser(auth));
+        return notify.listWebhooks();
+    }
+
+    public record WebhookBody(
+            String name, String url, String bearerToken, Boolean enabled, String scopeType, UUID scopeId) {}
+
+    @PostMapping("/monitor/notify/webhooks")
+    public Map<String, Object> createWebhook(@RequestBody WebhookBody body, Authentication auth) {
+        UserEntity user = access.requireUser(auth);
+        access.assertCanManageAlertRules(user);
+        if (body == null || body.url() == null || body.url().isBlank()) {
+            throw new IllegalArgumentException("url required");
+        }
+        return notify.createWebhook(
+                user, body.name(), body.url(), body.bearerToken(), body.enabled(), body.scopeType(), body.scopeId());
+    }
+
+    @PatchMapping("/monitor/notify/webhooks/{id}")
+    public Map<String, Object> updateWebhook(
+            @PathVariable UUID id, @RequestBody WebhookBody body, Authentication auth) {
+        UserEntity user = access.requireUser(auth);
+        access.assertCanManageAlertRules(user);
+        return notify.updateWebhook(
+                user,
+                id,
+                body == null ? null : body.name(),
+                body == null ? null : body.url(),
+                body == null ? null : body.bearerToken(),
+                body == null ? null : body.enabled(),
+                body == null ? null : body.scopeType(),
+                body == null ? null : body.scopeId());
+    }
+
+    @DeleteMapping("/monitor/notify/webhooks/{id}")
+    public Map<String, String> deleteWebhook(@PathVariable UUID id, Authentication auth) {
+        UserEntity user = access.requireUser(auth);
+        access.assertCanManageAlertRules(user);
+        notify.deleteWebhook(user, id);
+        return Map.of("status", "deleted");
+    }
+
+    @PostMapping("/monitor/notify/webhooks/{id}/test")
+    public Map<String, Object> testWebhook(@PathVariable UUID id, Authentication auth) {
+        UserEntity user = access.requireUser(auth);
+        access.assertCanManageAlertRules(user);
+        return notify.testWebhook(user, id);
     }
 
     private static Instant parseOr(String s, Instant fallback) {

@@ -4,6 +4,7 @@ import com.ops.control.access.AccessService;
 import com.ops.control.access.ForbiddenException;
 import com.ops.control.controlaudit.ControlAuditService;
 import com.ops.control.group.GroupService;
+import com.ops.control.metrics.AlertIncidentRepository;
 import com.ops.control.metrics.AssetAlertIgnoreRepository;
 import com.ops.control.metrics.AssetAlertStatusRepository;
 import com.ops.control.user.ScopeTypes;
@@ -39,6 +40,7 @@ public class AssetService {
     private final UserScopeRepository userScopes;
     private final AssetAlertIgnoreRepository alertIgnores;
     private final AssetAlertStatusRepository alertStatus;
+    private final AlertIncidentRepository alertIncidents;
 
     public AssetService(
             AssetRepository assets,
@@ -47,7 +49,8 @@ public class AssetService {
             ControlAuditService audit,
             UserScopeRepository userScopes,
             AssetAlertIgnoreRepository alertIgnores,
-            AssetAlertStatusRepository alertStatus) {
+            AssetAlertStatusRepository alertStatus,
+            AlertIncidentRepository alertIncidents) {
         this.assets = assets;
         this.groups = groups;
         this.access = access;
@@ -55,6 +58,7 @@ public class AssetService {
         this.userScopes = userScopes;
         this.alertIgnores = alertIgnores;
         this.alertStatus = alertStatus;
+        this.alertIncidents = alertIncidents;
     }
 
     public record UpdateRequest(String displayName, String remark, UUID groupId, Boolean updateGroup,
@@ -187,6 +191,7 @@ public class AssetService {
         userScopes.deleteByScopeTypeAndScopeId(ScopeTypes.ASSET, asset.getId());
         alertIgnores.deleteByAssetId(asset.getId());
         alertStatus.deleteById(asset.getId());
+        alertIncidents.deleteByAssetId(asset.getId());
         assets.delete(asset);
         return Map.of("status", "deleted", "id", id.toString());
     }

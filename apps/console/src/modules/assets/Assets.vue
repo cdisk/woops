@@ -239,6 +239,7 @@ import {
 } from '@tabler/icons-vue'
 import api from '../../shared/api'
 import { canManageInventory } from '../../shared/auth'
+import { formatAlertDuration } from '../../features/monitor/alertDuration'
 import { assetSessionActions } from '../../features/registry'
 import { isWindows } from '../../session/assetOs'
 import GroupTree, { ALL_KEY } from './GroupTree.vue'
@@ -344,8 +345,11 @@ function alertCount(row) {
 
 function issueLabel(issue) {
   if (!issue) return ''
-  if (issue.kind === 'offline' || issue.itemId === 'host.online') return t('common.offline')
-  return issue.label || issue.itemId
+  const base = (issue.kind === 'offline' || issue.itemId === 'host.online')
+    ? t('common.offline')
+    : (issue.label || issue.itemId)
+  const dur = formatAlertDuration(issue.startedAt)
+  return dur ? `${base} · ${dur}` : base
 }
 
 function applyRouteQuery() {

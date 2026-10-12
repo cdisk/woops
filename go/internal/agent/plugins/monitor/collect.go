@@ -48,10 +48,17 @@ func point(itemID, instance string, value float64) monitorproto.Point {
 	return monitorproto.Point{ItemID: itemID, Instance: instance, Value: value}
 }
 
+// Sample is one collection pass: flat points plus families whose instance set is complete.
+type Sample struct {
+	Points           []monitorproto.Point
+	CompleteFamilies []string
+}
+
 // Collect gathers host metrics as flat points (one value per row).
-func Collect() []monitorproto.Point {
+func Collect() Sample {
 	now := time.Now()
 	var out []monitorproto.Point
+	var complete []string
 
 	if hi, err := host.Info(); err == nil && hi != nil {
 		out = append(out, point("host.uptime_sec", "", float64(hi.Uptime)))
@@ -108,6 +115,7 @@ func Collect() []monitorproto.Point {
 	}
 
 	if parts, err := disk.Partitions(false); err == nil {
+		complete = append(complete, "disk")
 		// Prefer short mount paths so "/" wins over Docker bind mounts of the same device
 		// (e.g. /etc/hostname, /etc/hosts - same fs, not real disks).
 		sort.Slice(parts, func(i, j int) bool {
@@ -156,9 +164,12 @@ func Collect() []monitorproto.Point {
 	}
 
 	if counters, err := disk.IOCounters(); err == nil {
+		complete = append(complete, "diskio")
 		rates.mu.Lock()
 		elapsed := now.Sub(rates.lastAt).Seconds()
+		seenDiskIO := map[string]bool{}
 		for name, cur := range counters {
+			seenDiskIO[name] = true
 			out = append(out, point("diskio.read_bytes", name, float64(cur.ReadBytes)))
 			out = append(out, point("diskio.write_bytes", name, float64(cur.WriteBytes)))
 			out = append(out, point("diskio.read_count", name, float64(cur.ReadCount)))
@@ -169,17 +180,25 @@ func Collect() []monitorproto.Point {
 			}
 			rates.diskIO[name] = cur
 		}
+		for name := range rates.diskIO {
+			if !seenDiskIO[name] {
+				delete(rates.diskIO, name)
+			}
+		}
 		rates.mu.Unlock()
 	}
 
 	if nics, err := net.IOCounters(true); err == nil {
+		complete = append(complete, "net")
 		rates.mu.Lock()
 		elapsed := now.Sub(rates.lastAt).Seconds()
+		seenNet := map[string]bool{}
 		for _, cur := range nics {
 			name := cur.Name
 			if !netiface.IsReportable(name) {
 				continue
 			}
+			seenNet[name] = true
 			out = append(out, point("net.rx_bytes", name, float64(cur.BytesRecv)))
 			out = append(out, point("net.tx_bytes", name, float64(cur.BytesSent)))
 			out = append(out, point("net.rx_packets", name, float64(cur.PacketsRecv)))
@@ -196,6 +215,11 @@ func Collect() []monitorproto.Point {
 			}
 			rates.netIO[name] = cur
 		}
+		for name := range rates.netIO {
+			if !seenNet[name] {
+				delete(rates.netIO, name)
+			}
+		}
 		rates.mu.Unlock()
 	}
 
@@ -207,5 +231,5 @@ func Collect() []monitorproto.Point {
 		out = append(out, point("process.count", "", float64(len(pids))))
 	}
 
-	return out
+	return Sample{Points: out, CompleteFamilies: complete}
 }

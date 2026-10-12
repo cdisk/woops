@@ -7,8 +7,10 @@ import com.ops.control.assetevent.AssetEventService;
 import com.ops.control.controlaudit.ControlAuditService;
 import com.ops.control.common.OpsProperties;
 import com.ops.control.common.PublicUrlResolver;
+import com.ops.control.metrics.AlertEvaluationService;
 import com.ops.control.user.UserRepository;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,6 +31,7 @@ public class AgentService {
     private final ControlAuditService audit;
     private final AssetEventService assetEvents;
     private final UserRepository users;
+    private final AlertEvaluationService alertEval;
     private final SecureRandom random = new SecureRandom();
 
     public AgentService(
@@ -38,7 +41,8 @@ public class AgentService {
             PasswordEncoder passwordEncoder,
             ControlAuditService audit,
             AssetEventService assetEvents,
-            UserRepository users) {
+            UserRepository users,
+            @Lazy AlertEvaluationService alertEval) {
         this.installCodes = installCodes;
         this.assets = assets;
         this.props = props;
@@ -46,6 +50,7 @@ public class AgentService {
         this.audit = audit;
         this.assetEvents = assetEvents;
         this.users = users;
+        this.alertEval = alertEval;
     }
 
     public Map<String, Object> createInstallCode(UUID userId, UUID groupId, HttpServletRequest request) {
@@ -355,6 +360,7 @@ public class AgentService {
                         AssetEventService.jsonDetail(detail),
                         blankToEmpty(m.gatewayInstance()),
                         blankToEmpty(m.connectionId()));
+                alertEval.recompute(assetId);
             }
         });
     }

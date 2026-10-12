@@ -98,6 +98,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../../shared/api'
 import IgnoredAlertsDialog from './IgnoredAlertsDialog.vue'
+import { formatAlertDuration } from './alertDuration'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -130,8 +131,11 @@ function issuesOf(row) {
 
 function issueLabel(issue) {
   if (!issue) return ''
-  if (issue.kind === 'offline' || issue.itemId === 'host.online') return t('common.offline')
-  return issue.label || issue.itemId
+  const base = (issue.kind === 'offline' || issue.itemId === 'host.online')
+    ? t('common.offline')
+    : (issue.label || issue.itemId)
+  const dur = formatAlertDuration(issue.startedAt)
+  return dur ? `${base} · ${dur}` : base
 }
 
 function openMonitor(row) {

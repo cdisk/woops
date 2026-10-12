@@ -21,7 +21,8 @@ public class MetricsInternalController {
             @NotBlank String assetId,
             @NotBlank String agentToken,
             String collectedAt,
-            List<PointBody> points
+            List<PointBody> points,
+            List<String> completeFamilies
     ) {}
 
     @PostMapping("/ingest")
@@ -30,7 +31,12 @@ public class MetricsInternalController {
                 .filter(p -> p != null && p.itemId() != null && !p.itemId().isBlank())
                 .map(p -> new MetricsService.PointIn(p.itemId(), p.instance(), p.value()))
                 .toList();
-        metrics.ingest(body.assetId(), body.agentToken(), body.collectedAt(), points);
+        metrics.ingest(
+                body.assetId(),
+                body.agentToken(),
+                body.collectedAt(),
+                points,
+                body.completeFamilies());
         return Map.of("status", "ok");
     }
 }

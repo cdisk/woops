@@ -11,6 +11,8 @@ import java.util.UUID;
 public interface AssetAlertIgnoreRepository extends JpaRepository<AssetAlertIgnoreEntity, AssetAlertIgnoreId> {
     List<AssetAlertIgnoreEntity> findAllByOrderByIgnoredAtDesc();
 
+    List<AssetAlertIgnoreEntity> findByAssetId(UUID assetId);
+
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("delete from AssetAlertIgnoreEntity i where i.assetId = :assetId")
     int deleteByAssetId(@Param("assetId") UUID assetId);

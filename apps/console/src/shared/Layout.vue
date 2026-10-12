@@ -26,6 +26,14 @@
           <IconBell class="nav-icon" :size="18" stroke-width="1.75" />
           <span>{{ t('nav.alerts') }}</span>
         </el-menu-item>
+        <el-menu-item v-if="showAlerts" index="/monitor/notifications">
+          <IconBellRinging class="nav-icon" :size="18" stroke-width="1.75" />
+          <span>{{ t('nav.notifications') }}</span>
+        </el-menu-item>
+        <el-menu-item index="/monitor/incidents">
+          <IconAlertTriangle class="nav-icon" :size="18" stroke-width="1.75" />
+          <span>{{ t('nav.incidents') }}</span>
+        </el-menu-item>
         <el-menu-item v-if="showUsers" index="/users">
           <IconUsers class="nav-icon" :size="18" stroke-width="1.75" />
           <span>{{ t('nav.users') }}</span>
@@ -76,7 +84,9 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import {
+  IconAlertTriangle,
   IconBell,
+  IconBellRinging,
   IconClipboardList,
   IconHome,
   IconNetwork,
