@@ -158,17 +158,25 @@ public class AlertNotifyService {
     @Transactional
     public Map<String, Object> testWebhook(UserEntity actor, UUID id) {
         AlertNotifyWebhookEntity w = webhooks.findById(id).orElseThrow(() -> new IllegalArgumentException("webhook not found"));
+        // Full sample shaped like a real firing payload so bridges can validate all fields.
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("event", "test");
-        payload.put("assetId", "");
-        payload.put("assetName", "test");
-        payload.put("groupName", "");
-        payload.put("itemId", "test");
-        payload.put("instance", "");
+        payload.put("assetId", "3fa85f64-5717-4562-b3fc-2c963f66afa6");
+        payload.put("assetName", "web-01");
+        payload.put("groupName", "prod");
+        payload.put("privateIp", "10.0.0.5");
+        payload.put("itemId", "disk.used_percent");
+        payload.put("instance", "/");
         payload.put("kind", "metric");
-        payload.put("label", "webhook test");
+        payload.put("label", "Disk high (/)=99");
         payload.put("time", Instant.now().toString());
-        payload.put("recipients", List.of());
+        payload.put("incidentId", "7c9e6679-7425-40de-944b-e07fc1f90ae7");
+        Map<String, Object> self = new LinkedHashMap<>();
+        self.put("userId", actor.getId().toString());
+        self.put("username", actor.getUsername());
+        self.put("nickname", actor.getNickname() == null ? "" : actor.getNickname());
+        self.put("authSource", actor.getAuthSource() == null ? "local" : actor.getAuthSource());
+        payload.put("recipients", List.of(self));
         deliverNow(w, payload);
         audit.record(
                 ControlAuditService.CAT_MONITOR,
@@ -219,6 +227,7 @@ public class AlertNotifyService {
         payload.put("assetId", asset.getId().toString());
         payload.put("assetName", asset.getDisplayName() != null ? asset.getDisplayName() : asset.getId().toString());
         payload.put("groupName", groupName);
+        payload.put("privateIp", asset.getPrivateIp() == null ? "" : asset.getPrivateIp());
         payload.put("itemId", issue.itemId());
         payload.put("instance", issue.instance() == null ? "" : issue.instance());
         payload.put("kind", issue.kind());

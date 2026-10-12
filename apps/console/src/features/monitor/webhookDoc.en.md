@@ -12,7 +12,7 @@ Woops `POST`s JSON to each admin-configured webhook URL when a monitor issue **s
 | Timeout | ~10s; non-2xx responses are retried via the outbox |
 | URL | Prefer HTTPS; loopback / link-local targets are rejected |
 
-The console **Test** button immediately POSTs a sample with `event: "test"` for bridge bring-up.
+The console **Test** button immediately POSTs a full sample shaped like `firing` (`event: "test"`) for bridge bring-up.
 
 ## Payload fields
 
@@ -22,6 +22,7 @@ The console **Test** button immediately POSTs a sample with `event: "test"` for 
 | `assetId` | string | Asset UUID (may be empty for `test`) |
 | `assetName` | string | Display name |
 | `groupName` | string | Group name, or empty if ungrouped |
+| `privateIp` | string | Private IP(s) from the asset (comma-separated if multiple; empty if unknown) |
 | `itemId` | string | Metric id, e.g. `cpu.usage_percent`; offline uses `host.online` |
 | `instance` | string | Instance (mount, NIC, …); empty if none |
 | `kind` | string | `metric` or `offline` |
@@ -58,6 +59,7 @@ Content-Type: application/json
   "assetId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
   "assetName": "web-01",
   "groupName": "prod",
+  "privateIp": "10.0.0.5",
   "itemId": "disk.used_percent",
   "instance": "/",
   "kind": "metric",
@@ -81,18 +83,29 @@ Same fields as `firing`, with `event` set to `"resolved"` (metric recovered, dis
 
 ## Example: test
 
+Console **Test** POSTs a **full** sample shaped like `firing` (`event: "test"`). Asset/alert fields are fixed examples; `recipients` includes the current operator (so bridges can map a real username), e.g.:
+
 ```json
 {
   "event": "test",
-  "assetId": "",
-  "assetName": "test",
-  "groupName": "",
-  "itemId": "test",
-  "instance": "",
+  "assetId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "assetName": "web-01",
+  "groupName": "prod",
+  "privateIp": "10.0.0.5",
+  "itemId": "disk.used_percent",
+  "instance": "/",
   "kind": "metric",
-  "label": "webhook test",
+  "label": "Disk high (/)=99",
   "time": "2026-10-12T10:00:00Z",
-  "recipients": []
+  "incidentId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+  "recipients": [
+    {
+      "userId": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+      "username": "admin",
+      "nickname": "",
+      "authSource": "local"
+    }
+  ]
 }
 ```
 

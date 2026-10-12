@@ -12,7 +12,7 @@ Woops 在监控异常 **出现**（`firing`）或 **恢复**（`resolved`）时�
 | 超时 | 约 10 秒；非 2xx 会进入 outbox 重试 |
 | URL | 建议 HTTPS；拒绝 loopback / link-local 等地址 |
 
-控制台「测试」按钮会立刻 POST 一条 `event: "test"` 的样例，便于联调桥接程序。
+控制台「测试」按钮会立刻 POST 一条与 `firing` 同形、字段齐全的 `event: "test"` 样例，便于联调桥接程序。
 
 ## Payload 字段
 
@@ -22,6 +22,7 @@ Woops 在监控异常 **出现**（`firing`）或 **恢复**（`resolved`）时�
 | `assetId` | string | 资产 UUID（`test` 时可能为空） |
 | `assetName` | string | 显示名 |
 | `groupName` | string | 所属分组名，未分组为空串 |
+| `privateIp` | string | 内网 IP（与资产一致，多地址时逗号分隔；未知为空串） |
 | `itemId` | string | 监控项，如 `cpu.usage_percent`；离线为 `host.online` |
 | `instance` | string | 实例（磁盘挂载点、网卡名等）；无则空串 |
 | `kind` | string | `metric` 或 `offline` |
@@ -58,6 +59,7 @@ Content-Type: application/json
   "assetId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
   "assetName": "web-01",
   "groupName": "prod",
+  "privateIp": "10.0.0.5",
   "itemId": "disk.used_percent",
   "instance": "/",
   "kind": "metric",
@@ -81,18 +83,29 @@ Content-Type: application/json
 
 ## 示例：test
 
+控制台「测试」会推送与 `firing` **同形、字段齐全**的样例（`event` 为 `"test"`）；资产/告警字段为固定示例，`recipients` 含当前操作者（便于桥接映射真实用户名），例如：
+
 ```json
 {
   "event": "test",
-  "assetId": "",
-  "assetName": "test",
-  "groupName": "",
-  "itemId": "test",
-  "instance": "",
+  "assetId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "assetName": "web-01",
+  "groupName": "prod",
+  "privateIp": "10.0.0.5",
+  "itemId": "disk.used_percent",
+  "instance": "/",
   "kind": "metric",
-  "label": "webhook test",
+  "label": "Disk high (/)=99",
   "time": "2026-10-12T10:00:00Z",
-  "recipients": []
+  "incidentId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+  "recipients": [
+    {
+      "userId": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+      "username": "admin",
+      "nickname": "",
+      "authSource": "local"
+    }
+  ]
 }
 ```
 
