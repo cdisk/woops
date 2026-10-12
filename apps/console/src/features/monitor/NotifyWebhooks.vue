@@ -1,6 +1,7 @@
 <template>
   <div class="page" v-loading="loading">
     <div class="page-toolbar">
+      <el-button size="small" @click="docVisible = true">{{ t('monitor.webhookDoc') }}</el-button>
       <el-button type="primary" size="small" @click="openCreate">{{ t('monitor.addWebhook') }}</el-button>
     </div>
     <el-table :data="rows" size="small" stripe>
@@ -66,6 +67,19 @@
         <el-button type="primary" :loading="saving" @click="save">{{ t('common.save') }}</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="docVisible"
+      :title="t('monitor.webhookDocTitle')"
+      width="720px"
+      class="webhook-doc-dialog"
+      destroy-on-close
+    >
+      <div class="doc-toolbar">
+        <el-button size="small" type="primary" plain @click="copyDoc">{{ t('monitor.copyWebhookDoc') }}</el-button>
+      </div>
+      <div class="md-body" v-html="docHtml" />
+    </el-dialog>
   </div>
 </template>
 
@@ -75,14 +89,30 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import api from '../../shared/api'
 import AssetTreeSelect from '../../shared/AssetTreeSelect.vue'
+import { renderApiDoc } from '../profile/renderApiDocMd'
+import webhookDocZh from './webhookDoc.md?raw'
+import webhookDocEn from './webhookDoc.en.md?raw'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const loading = ref(false)
 const saving = ref(false)
 const rows = ref([])
 const groups = ref([])
 const visible = ref(false)
+const docVisible = ref(false)
 const editing = ref(null)
+
+const docMd = computed(() => (String(locale.value).startsWith('zh') ? webhookDocZh : webhookDocEn))
+const docHtml = computed(() => renderApiDoc(docMd.value).html)
+
+async function copyDoc() {
+  try {
+    await navigator.clipboard.writeText(docMd.value)
+    ElMessage.success(t('common.copied'))
+  } catch {
+    ElMessage.error(t('common.copyFailed'))
+  }
+}
 const form = reactive({
   name: '',
   url: '',
@@ -209,5 +239,74 @@ onMounted(load)
   justify-content: flex-end;
   align-items: center;
   gap: 8px;
+}
+.doc-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 10px;
+}
+.md-body {
+  max-height: min(70vh, 640px);
+  overflow: auto;
+  font-size: 14px;
+  line-height: 1.65;
+  color: var(--ops-text);
+}
+.md-body :deep(h1) {
+  font-size: 1.35rem;
+  margin: 0 0 12px;
+  font-weight: 600;
+}
+.md-body :deep(h2) {
+  font-size: 1.1rem;
+  margin: 1.3em 0 0.55em;
+  font-weight: 600;
+  border-bottom: 1px solid var(--ops-border);
+  padding-bottom: 0.25em;
+}
+.md-body :deep(h3) {
+  font-size: 1rem;
+  margin: 1em 0 0.4em;
+  font-weight: 600;
+}
+.md-body :deep(p) { margin: 0.5em 0; }
+.md-body :deep(ul) { margin: 0.35em 0 0.55em; padding-left: 1.35em; }
+.md-body :deep(li) { margin: 0.2em 0; }
+.md-body :deep(code) {
+  font-family: var(--ops-font-mono), ui-monospace, monospace;
+  font-size: 0.9em;
+  background: var(--el-fill-color-light);
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+}
+.md-body :deep(pre) {
+  margin: 0.7em 0;
+  padding: 12px 14px;
+  background: var(--el-fill-color-light);
+  border-radius: 6px;
+  overflow-x: auto;
+}
+.md-body :deep(pre code) {
+  background: none;
+  padding: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.md-body :deep(table) {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.7em 0;
+  font-size: 13px;
+}
+.md-body :deep(th),
+.md-body :deep(td) {
+  border: 1px solid var(--ops-border);
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+.md-body :deep(th) {
+  background: var(--el-fill-color-lighter);
+  font-weight: 600;
 }
 </style>
