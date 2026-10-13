@@ -34,15 +34,16 @@ public interface AlertIncidentRepository extends JpaRepository<AlertIncidentEnti
 
     @Query("""
             select i from AlertIncidentEntity i
-            where (:assetId is null or i.assetId = :assetId)
+            where (:hasAsset = false or i.assetId = :assetId)
               and (:openOnly = false or i.resolvedAt is null)
               and (:resolvedOnly = false or i.resolvedAt is not null)
-              and (:from is null or i.startedAt >= :from)
-              and (:to is null or i.startedAt < :to)
+              and i.startedAt >= :from
+              and i.startedAt < :to
               and (:assetFilterEmpty = true or i.assetId in :assetIds)
             order by i.startedAt desc
             """)
     Page<AlertIncidentEntity> search(
+            @Param("hasAsset") boolean hasAsset,
             @Param("assetId") UUID assetId,
             @Param("openOnly") boolean openOnly,
             @Param("resolvedOnly") boolean resolvedOnly,

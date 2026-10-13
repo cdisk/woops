@@ -9,32 +9,35 @@
       </el-select>
       <el-button size="small" @click="reload">{{ t('common.refresh') }}</el-button>
     </div>
-    <el-table :data="items" size="small" stripe>
-      <el-table-column :label="t('monitor.asset')" min-width="160">
+    <el-table :data="items" size="small" stripe table-layout="auto">
+      <el-table-column :label="t('monitor.asset')" min-width="180" show-overflow-tooltip>
         <template #default="{ row }">
           <div class="name-cell">
-            <div>{{ row.assetName }}</div>
-            <div class="sub">{{ row.hostname }}</div>
+            <div class="ellip">{{ row.assetName }}</div>
+            <div class="sub ellip">{{ row.hostname }}</div>
           </div>
         </template>
       </el-table-column>
-      <el-table-column prop="groupName" :label="t('common.group')" min-width="120">
-        <template #default="{ row }">{{ row.groupName || t('common.ungrouped') }}</template>
-      </el-table-column>
-      <el-table-column :label="t('monitor.itemId')" min-width="150">
+      <el-table-column :label="t('common.group')" min-width="100" show-overflow-tooltip>
         <template #default="{ row }">
-          {{ monitorItemLabel(row.itemId, row.itemId) }}
-          <span v-if="row.instance" class="sub"> ({{ row.instance }})</span>
+          <span class="ellip">{{ row.groupName || t('common.ungrouped') }}</span>
         </template>
       </el-table-column>
-      <el-table-column prop="label" :label="t('monitor.summary')" min-width="160" show-overflow-tooltip />
-      <el-table-column :label="t('monitor.startedAt')" width="170">
+      <el-table-column :label="t('monitor.itemId')" min-width="120" show-overflow-tooltip>
+        <template #default="{ row }">
+          <span class="ellip">
+            {{ monitorItemLabel(row.itemId, row.itemId) }}<template v-if="row.instance"> ({{ row.instance }})</template>
+          </span>
+        </template>
+      </el-table-column>
+      <el-table-column prop="label" :label="t('monitor.summary')" min-width="220" show-overflow-tooltip />
+      <el-table-column :label="t('monitor.startedAt')" width="150">
         <template #default="{ row }">{{ fmt(row.startedAt) }}</template>
       </el-table-column>
-      <el-table-column :label="t('monitor.resolvedAt')" width="170">
+      <el-table-column :label="t('monitor.resolvedAt')" width="150">
         <template #default="{ row }">{{ row.resolvedAt ? fmt(row.resolvedAt) : t('monitor.statusOpen') }}</template>
       </el-table-column>
-      <el-table-column :label="t('monitor.resolutionReason')" width="130">
+      <el-table-column :label="t('monitor.resolutionReason')" width="100" show-overflow-tooltip>
         <template #default="{ row }">{{ reasonLabel(row.resolutionReason) }}</template>
       </el-table-column>
     </el-table>
@@ -53,6 +56,7 @@
 <script setup>
 import { onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { ElMessage } from 'element-plus'
 import api from '../../shared/api'
 import AssetTreeSelect from '../../shared/AssetTreeSelect.vue'
 import { monitorItemLabel } from './monitorItemLabel'
@@ -95,6 +99,10 @@ async function load() {
     })
     items.value = data?.items || []
     total.value = data?.total || 0
+  } catch (e) {
+    items.value = []
+    total.value = 0
+    ElMessage.error(e.response?.data?.error || t('common.loadFailed'))
   } finally {
     loading.value = false
   }
@@ -122,10 +130,20 @@ onMounted(load)
   margin-bottom: 12px;
   flex-wrap: wrap;
 }
-.name-cell .sub,
-.sub {
+.name-cell {
+  min-width: 0;
+  line-height: 1.15;
+}
+.name-cell .sub {
   color: var(--ops-text-muted, #888);
   font-size: 12px;
+}
+.ellip {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 .pager {
   display: flex;

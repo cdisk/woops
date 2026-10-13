@@ -263,12 +263,19 @@ public class AlertEvaluationService {
         if (assetId != null && !superAdmin && !assetIds.contains(assetId)) {
             return PageSupport.emptyPage(p, size);
         }
+        // Postgres cannot infer type of null Instant/UUID binds in "(:x is null or …)";
+        // use sentinels like ServerOperationAuditService.
+        boolean hasAsset = assetId != null;
+        UUID assetIdParam = hasAsset ? assetId : new UUID(0, 0);
+        Instant fromBound = from != null ? from : Instant.EPOCH;
+        Instant toBound = to != null ? to : Instant.parse("9999-12-31T00:00:00Z");
         Page<AlertIncidentEntity> result = incidents.search(
-                assetId,
+                hasAsset,
+                assetIdParam,
                 openOnly,
                 resolvedOnly,
-                from,
-                to,
+                fromBound,
+                toBound,
                 filterEmpty,
                 assetIds,
                 PageRequest.of(p - 1, size));
