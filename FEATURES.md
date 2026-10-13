@@ -4,7 +4,7 @@
 > 任何功能新增、完成、搁置、行为变更，都必须先读本文件，并在同一变更中更新对应条目的状态与说明。  
 > README 只保留快速启动。历史设计稿 `bastion_architecture_design_*.plan.md` 不必再读。
 
-**最后更新：** 2026-10-13（监控预警规则增加触发/恢复持续时间，默认 3 分钟）
+**最后更新：** 2026-10-13（告警历史增加 IP 列）
 
 ---
 
@@ -128,7 +128,7 @@
 | `[x]` | 指标统计报表 API | `POST /api/reports/metrics`：单资产、多 `itemId`、`[from,to)`、`hour\|day` 等粒度；一次返回区间统计 + 趋势 `points`（`time`/`value`/`min`/`max`，由调用方绘图）；JWT 或 `metrics:read` API Token；控制审计 `MONITOR`/`REPORT_READ`（不记 points/secret）。调用示例 [`docs/metrics-report-api.md`](docs/metrics-report-api.md) |
 | `[x]` | 监控预警 | 全局阈值（优先 %）；入库评估；`asset_alert_status`；配置 CRUD；**仅超管**可见菜单与 API。首页异常含离线；忽略按 **资产+监控项**（`asset_alert_ignores`，离线项 `host.online`；忽略是展示/通知策略，不关闭客观 incident）。指标规则可配 **`fireMinutes` / `recoverMinutes`**（默认 **3**，`0`=立即）：连续满足才开/关 incident 并推 Webhook；表 `alert_pending` 落库计时（重启不丢）；首页异常与 Webhook 共用同一状态机（pending 未满时不进异常列表）。**离线/上线立即**；`INSTANCE_GONE` / `ASSET_OFFLINE` / `RULE_CHANGED` 立即关。改规则阈值或持续时间时清该规则 pending |
 | `[x]` | 告警 Webhook | **仅超管** CRUD 端点（URL + Bearer Token + 启停 + 范围 `ALL`/`GROUP`/`ASSET`）；firing/resolved；payload 含 `privateIp`（资产内网 IP，多地址逗号分隔）与按显式 `user_scopes` 解析的负责人（`SUPER_ADMIN` 隐式全量不计入）；全局 ignore 期间不投递；取消 ignore 且仍异常时补发 firing。控制台「测试」推送与 firing **同形、字段齐全**的样例（`event=test`，固定示例资产/告警字段，`recipients` 含当前操作者）。无 MQ：`alert_notify_outbox` + 定时重试。企业微信适配由**外部桥接程序**完成（Woops 不同步企微通讯录）。控制台「通知」页有 **接口说明** 弹窗（`features/monitor/webhookDoc{,.en}.md`，一语言一文件，可复制全文） |
-| `[x]` | 告警 incident | 表 `alert_incidents` 记录客观生命周期（开始/最后命中/恢复、值、规则快照、`resolution_reason`：`NORMAL`/`INSTANCE_GONE`/`ASSET_OFFLINE`/`RULE_CHANGED`）；与 ignore 表分离；指标开/关受规则持续分钟约束（见监控预警）。`GET /api/monitor/alert-incidents` 分页，按用户资产可见范围；控制台「告警历史」 |
+| `[x]` | 告警 incident | 表 `alert_incidents` 记录客观生命周期（开始/最后命中/恢复、值、规则快照、`resolution_reason`：`NORMAL`/`INSTANCE_GONE`/`ASSET_OFFLINE`/`RULE_CHANGED`）；与 ignore 表分离；指标开/关受规则持续分钟约束（见监控预警）。`GET /api/monitor/alert-incidents` 分页，按用户资产可见范围（含 `privateIp`/`publicIp`）；控制台「告警历史」列表在分组后有 **IP** 列（内网主、公网次，同首页） |
 | `[x]` | 指标实例对账 | Agent 上报 `completeFamilies`（`disk`/`diskio`/`net`，仅对应枚举成功时声明）；ingest 删除该族本轮不存在的 `monitor_latest` 行（保留 history/trends）；触发 `INSTANCE_GONE` 恢复。老 Agent 无该字段则只 upsert、不推断消失 |
 | `[x]` | 首页概览 | 资产总数 / 在线 / 异常（**含离线**，与监控预警并列）；登录进首页。异常按监控项可 **忽略 / 取消忽略**（如只忽略离线或 CPU，不影响该资产其他项；忽略后不占异常列表；「异常资产」标题右侧打开已忽略弹窗 `IgnoredAlertsDialog`；可见资产即可操作；控制审计 `MONITOR`/`IGNORE`/`UNIGNORE`）。异常列表与已忽略清单均展示 **分组**（`groupId`/`groupName`，未分组显示「未分组」；已忽略弹窗加宽）；**名称+主机名**合成一列两行（名称可点 → `/assets?q=`；主机名小灰字）；**IP** 列两行（内网主、公网次，同资产列表）；**分组**可点 → `/assets?groupId=`（左侧树选中该组；未分组不可点）。异常 tag 附 **持续时长**（来自 open `alert_incidents.startedAt`）：`≥3d`→`Nd`，否则 `1d5h` / `1h32m` / `5m` / `<1m` |
 | `[x]` | 资产监控页 | 操作「监控」→ 新浏览器标签 `/assets/:id/monitor`（无侧栏，同会话页）；复用 `AssetMonitorPanel`；顶部规格；各图下最高/平均/最低；默认曲线含 `cpu.usage_percent` / `cpu.steal_percent` / mem / disk / load / swap / net rx·tx；时间范围快捷：5 分钟 / 30 分钟 / 1 小时 / 6 小时 / 1 天 / 7 天 / 30 天 / 90 天 / 1 年；图表横向框选时间后按该范围重载全部曲线并自适应 grain；标题左侧关闭（有 opener 则关标签）；首屏 items/latest/series 并行加载，ECharts 按需打包 |

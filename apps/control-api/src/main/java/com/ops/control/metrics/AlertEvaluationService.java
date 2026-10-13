@@ -298,6 +298,8 @@ public class AlertEvaluationService {
         m.put("hostname", a == null || a.getHostname() == null ? "" : a.getHostname());
         m.put("groupId", a == null || a.getGroupId() == null ? null : a.getGroupId().toString());
         m.put("groupName", a == null || a.getGroupId() == null ? "" : groupNames.getOrDefault(a.getGroupId(), ""));
+        m.put("privateIp", a == null || a.getPrivateIp() == null ? "" : a.getPrivateIp());
+        m.put("publicIp", a == null || a.getPublicIp() == null ? "" : a.getPublicIp());
         m.put("itemId", inc.getItemId());
         m.put("instance", inc.getInstance());
         m.put("kind", inc.getKind());

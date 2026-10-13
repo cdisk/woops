@@ -23,6 +23,14 @@
           <span class="ellip">{{ row.groupName || t('common.ungrouped') }}</span>
         </template>
       </el-table-column>
+      <el-table-column :label="t('assets.ipCol')" min-width="120" show-overflow-tooltip>
+        <template #default="{ row }">
+          <div class="name-cell">
+            <div class="ellip">{{ row.privateIp || t('common.emDash') }}</div>
+            <div class="sub ellip">{{ row.publicIp || t('common.emDash') }}</div>
+          </div>
+        </template>
+      </el-table-column>
       <el-table-column :label="t('monitor.itemId')" min-width="120" show-overflow-tooltip>
         <template #default="{ row }">
           <span class="ellip">
