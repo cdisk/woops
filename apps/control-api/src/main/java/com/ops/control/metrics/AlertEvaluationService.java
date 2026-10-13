@@ -22,6 +22,7 @@ public class AlertEvaluationService {
     private final AssetAlertStatusRepository alertStatus;
     private final AssetAlertIgnoreRepository alertIgnores;
     private final AlertIncidentRepository incidents;
+    private final AlertPendingRepository pendings;
     private final AlertNotifyService notify;
     private final GroupService groups;
 
@@ -32,6 +33,7 @@ public class AlertEvaluationService {
             AssetAlertStatusRepository alertStatus,
             AssetAlertIgnoreRepository alertIgnores,
             AlertIncidentRepository incidents,
+            AlertPendingRepository pendings,
             AlertNotifyService notify,
             GroupService groups) {
         this.assets = assets;
@@ -40,6 +42,7 @@ public class AlertEvaluationService {
         this.alertStatus = alertStatus;
         this.alertIgnores = alertIgnores;
         this.incidents = incidents;
+        this.pendings = pendings;
         this.notify = notify;
         this.groups = groups;
     }
@@ -68,10 +71,20 @@ public class AlertEvaluationService {
         RecomputeOptions opts = options == null ? RecomputeOptions.none() : options;
         Instant now = Instant.now();
 
-        List<AlertIssueLogic.Rule> enabledRules = rules.findByEnabledTrue().stream()
-                .map(r -> new AlertIssueLogic.Rule(
-                        r.getId(), r.getName(), r.getItemId(), r.getInstance(), r.getOp(), r.getThreshold()))
-                .toList();
+        Map<UUID, MetricAlertRuleEntity> ruleById = new HashMap<>();
+        List<AlertIssueLogic.Rule> enabledRules = new ArrayList<>();
+        for (MetricAlertRuleEntity r : rules.findByEnabledTrue()) {
+            ruleById.put(r.getId(), r);
+            enabledRules.add(new AlertIssueLogic.Rule(
+                    r.getId(),
+                    r.getName(),
+                    r.getItemId(),
+                    r.getInstance(),
+                    r.getOp(),
+                    r.getThreshold(),
+                    r.getFireMinutes(),
+                    r.getRecoverMinutes()));
+        }
         List<AlertIssueLogic.Point> points = latestRepo.findByAssetIdOrderByItemIdAscInstanceAsc(assetId).stream()
                 .map(row -> new AlertIssueLogic.Point(row.getItemId(), row.getInstance(), row.getValue()))
                 .toList();
@@ -79,11 +92,15 @@ public class AlertEvaluationService {
         List<AlertIssueLogic.Issue> actual = AlertIssueLogic.actualIssues(asset.isOnline(), metricHits);
 
         Set<String> ignored = ignoredItemIds(assetId);
-        List<AlertIssueLogic.Issue> visible = AlertIssueLogic.visibleIssues(asset.isOnline(), metricHits, ignored);
 
         Map<String, AlertIncidentEntity> openByKey = new HashMap<>();
         for (AlertIncidentEntity inc : incidents.findByAssetIdAndResolvedAtIsNull(assetId)) {
             openByKey.put(AlertIssueLogic.issueKey(inc.getItemId(), inc.getInstance(), inc.getRuleId()), inc);
+        }
+
+        Map<String, AlertPendingEntity> pendingByKey = new HashMap<>();
+        for (AlertPendingEntity p : pendings.findByAssetId(assetId)) {
+            pendingByKey.put(AlertIssueLogic.issueKey(p.getItemId(), p.getInstance(), p.getRuleId()), p);
         }
 
         Set<String> seen = new HashSet<>();
@@ -91,14 +108,39 @@ public class AlertEvaluationService {
             String key = AlertIssueLogic.issueKey(issue);
             seen.add(key);
             AlertIncidentEntity existing = openByKey.get(key);
-            if (existing == null) {
-                AlertIncidentEntity created = openIncident(assetId, issue, now);
-                notify.enqueueIssueEvent(asset, issue, "firing", now, ignored, created.getId());
-            } else {
+            boolean offlineIssue = AlertIssueLogic.KIND_OFFLINE.equals(issue.kind());
+            int fireMinutes = offlineIssue ? 0 : fireMinutesOf(issue.ruleId(), ruleById);
+
+            if (existing != null) {
+                // Rematch while open: cancel recover wait and refresh.
+                clearPending(pendingByKey, assetId, issue);
                 existing.setLastSeenAt(now);
                 existing.setLatestValue(issue.value());
                 existing.setLabel(issue.label());
                 incidents.save(existing);
+                continue;
+            }
+
+            if (fireMinutes <= 0) {
+                clearPending(pendingByKey, assetId, issue);
+                AlertIncidentEntity created = openIncident(assetId, issue, now);
+                openByKey.put(key, created);
+                notify.enqueueIssueEvent(asset, issue, "firing", now, ignored, created.getId());
+                continue;
+            }
+
+            AlertPendingEntity pending = pendingByKey.get(key);
+            if (pending == null || !AlertPendingEntity.PHASE_FIRE.equals(pending.getPhase())) {
+                upsertPending(pendingByKey, assetId, issue, AlertPendingEntity.PHASE_FIRE, now);
+                continue;
+            }
+            if (AlertDurationLogic.heldLongEnough(pending.getSinceAt(), now, fireMinutes)) {
+                clearPending(pendingByKey, assetId, issue);
+                AlertIncidentEntity created = openIncident(assetId, issue, now);
+                openByKey.put(key, created);
+                notify.enqueueIssueEvent(asset, issue, "firing", now, ignored, created.getId());
+            } else {
+                upsertPending(pendingByKey, assetId, issue, AlertPendingEntity.PHASE_FIRE, now);
             }
         }
 
@@ -109,12 +151,48 @@ public class AlertEvaluationService {
             }
             AlertIncidentEntity inc = e.getValue();
             String reason = resolveReason(inc, opts.goneLatestKeys(), wentOffline);
-            closeIncident(inc, now, reason);
             AlertIssueLogic.Issue issue = toIssue(inc);
-            notify.enqueueIssueEvent(asset, issue, "resolved", now, ignored, inc.getId());
+            boolean immediate = AlertDurationLogic.isImmediateCloseReason(inc.getKind(), reason);
+            int recoverMinutes = immediate ? 0 : recoverMinutesOf(inc.getRuleId(), ruleById);
+
+            if (recoverMinutes <= 0) {
+                clearPending(pendingByKey, assetId, issue);
+                closeIncident(inc, now, reason);
+                notify.enqueueIssueEvent(asset, issue, "resolved", now, ignored, inc.getId());
+                continue;
+            }
+
+            AlertPendingEntity pending = pendingByKey.get(e.getKey());
+            Instant since;
+            if (pending == null || !AlertPendingEntity.PHASE_RECOVER.equals(pending.getPhase())) {
+                since = now;
+                upsertPending(pendingByKey, assetId, issue, AlertPendingEntity.PHASE_RECOVER, now);
+            } else {
+                since = pending.getSinceAt();
+                upsertPending(pendingByKey, assetId, issue, AlertPendingEntity.PHASE_RECOVER, now);
+            }
+            if (AlertDurationLogic.heldLongEnough(since, now, recoverMinutes)) {
+                clearPending(pendingByKey, assetId, issue);
+                closeIncident(inc, now, reason);
+                notify.enqueueIssueEvent(asset, issue, "resolved", now, ignored, inc.getId());
+            }
+            // else keep open incident; recover pending tracks wait
         }
 
-        writeAssetStatus(assetId, visible, now);
+        // Drop FIRE pendings for keys no longer matching (cleared before fire matured).
+        for (AlertPendingEntity p : List.copyOf(pendingByKey.values())) {
+            if (!AlertPendingEntity.PHASE_FIRE.equals(p.getPhase())) {
+                continue;
+            }
+            String key = AlertIssueLogic.issueKey(p.getItemId(), p.getInstance(), p.getRuleId());
+            if (!seen.contains(key)) {
+                pendings.delete(p);
+                pendingByKey.remove(key);
+            }
+        }
+
+        List<AlertIssueLogic.Issue> statusIssues = statusIssuesFromOpen(asset, openByKey.values(), ignored);
+        writeAssetStatus(assetId, statusIssues, now);
     }
 
     /** After unignore: if open incidents remain for the item, re-notify firing. */
@@ -139,6 +217,7 @@ public class AlertEvaluationService {
             return;
         }
         Instant now = Instant.now();
+        pendings.deleteByRuleId(ruleId);
         for (AlertIncidentEntity inc : incidents.findByRuleIdAndResolvedAtIsNull(ruleId)) {
             AssetEntity asset = assets.findById(inc.getAssetId()).orElse(null);
             closeIncident(inc, now, AlertIncidentEntity.REASON_RULE_CHANGED);
@@ -147,6 +226,14 @@ public class AlertEvaluationService {
                 notify.enqueueIssueEvent(asset, toIssue(inc), "resolved", now, ignored, inc.getId());
                 recompute(asset.getId());
             }
+        }
+    }
+
+    /** Clear pending timers for a rule (threshold/duration edits) then re-evaluate. */
+    @Transactional
+    public void clearPendingForRule(UUID ruleId) {
+        if (ruleId != null) {
+            pendings.deleteByRuleId(ruleId);
         }
     }
 
@@ -220,6 +307,92 @@ public class AlertEvaluationService {
         m.put("resolutionReason", inc.getResolutionReason());
         m.put("open", inc.isOpen());
         return m;
+    }
+
+    private void upsertPending(
+            Map<String, AlertPendingEntity> pendingByKey,
+            UUID assetId,
+            AlertIssueLogic.Issue issue,
+            String phase,
+            Instant now) {
+        if (issue.ruleId() == null) {
+            return;
+        }
+        String key = AlertIssueLogic.issueKey(issue);
+        AlertPendingEntity p = pendingByKey.get(key);
+        if (p == null) {
+            p = new AlertPendingEntity();
+            p.setAssetId(assetId);
+            p.setRuleId(issue.ruleId());
+            p.setItemId(issue.itemId());
+            p.setInstance(issue.instance());
+            p.setPhase(phase);
+            p.setSinceAt(now);
+            pendingByKey.put(key, p);
+        } else if (!phase.equals(p.getPhase())) {
+            p.setPhase(phase);
+            p.setSinceAt(now);
+        }
+        p.setLatestValue(issue.value());
+        p.setLabel(issue.label());
+        p.setUpdatedAt(now);
+        pendings.save(p);
+    }
+
+    private void clearPending(
+            Map<String, AlertPendingEntity> pendingByKey, UUID assetId, AlertIssueLogic.Issue issue) {
+        if (issue.ruleId() == null) {
+            return;
+        }
+        String key = AlertIssueLogic.issueKey(issue);
+        AlertPendingEntity p = pendingByKey.remove(key);
+        if (p != null) {
+            pendings.delete(p);
+        } else {
+            pendings.deleteOne(assetId, issue.ruleId(), issue.itemId(), issue.instance() == null ? "" : issue.instance());
+        }
+    }
+
+    private static int fireMinutesOf(UUID ruleId, Map<UUID, MetricAlertRuleEntity> ruleById) {
+        if (ruleId == null) {
+            return 0;
+        }
+        MetricAlertRuleEntity r = ruleById.get(ruleId);
+        return r == null ? 0 : Math.max(0, r.getFireMinutes());
+    }
+
+    private static int recoverMinutesOf(UUID ruleId, Map<UUID, MetricAlertRuleEntity> ruleById) {
+        if (ruleId == null) {
+            return 0;
+        }
+        MetricAlertRuleEntity r = ruleById.get(ruleId);
+        // Rule missing (disabled mid-flight): close immediately.
+        return r == null ? 0 : Math.max(0, r.getRecoverMinutes());
+    }
+
+    private static List<AlertIssueLogic.Issue> statusIssuesFromOpen(
+            AssetEntity asset, Collection<AlertIncidentEntity> open, Set<String> ignored) {
+        Set<String> ig = ignored == null ? Set.of() : ignored;
+        if (!asset.isOnline()) {
+            if (ig.contains(AlertIssueLogic.ITEM_HOST_ONLINE)) {
+                return List.of();
+            }
+            return List.of(AlertIssueLogic.offlineIssue());
+        }
+        List<AlertIssueLogic.Issue> out = new ArrayList<>();
+        for (AlertIncidentEntity inc : open) {
+            if (!inc.isOpen()) {
+                continue;
+            }
+            if (ig.contains(inc.getItemId())) {
+                continue;
+            }
+            if (AlertIssueLogic.KIND_OFFLINE.equals(inc.getKind())) {
+                continue;
+            }
+            out.add(toIssue(inc));
+        }
+        return out;
     }
 
     private AlertIncidentEntity openIncident(UUID assetId, AlertIssueLogic.Issue issue, Instant now) {

@@ -105,6 +105,8 @@ public class MetricsBootstrap implements ApplicationRunner {
         r.setOp(op);
         r.setThreshold(threshold);
         r.setEnabled(true);
+        r.setFireMinutes(AlertDurationLogic.DEFAULT_MINUTES);
+        r.setRecoverMinutes(AlertDurationLogic.DEFAULT_MINUTES);
         r.setCreatedAt(Instant.now());
         r.setUpdatedAt(Instant.now());
         rules.save(r);

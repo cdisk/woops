@@ -11,6 +11,8 @@
       </el-table-column>
       <el-table-column prop="op" :label="t('monitor.condition')" width="80" />
       <el-table-column prop="threshold" :label="t('monitor.threshold')" width="100" />
+      <el-table-column prop="fireMinutes" :label="t('monitor.fireMinutes')" width="110" />
+      <el-table-column prop="recoverMinutes" :label="t('monitor.recoverMinutes')" width="110" />
       <el-table-column :label="t('monitor.enabled')" width="90">
         <template #default="{ row }">
           <el-switch
@@ -28,8 +30,8 @@
       </el-table-column>
     </el-table>
 
-    <el-dialog v-model="visible" :title="editing ? t('monitor.editRule') : t('monitor.createRule')" width="480px">
-      <el-form label-width="90px">
+    <el-dialog v-model="visible" :title="editing ? t('monitor.editRule') : t('monitor.createRule')" width="520px">
+      <el-form label-width="110px">
         <el-form-item :label="t('common.name')">
           <el-input v-model="form.name" />
         </el-form-item>
@@ -56,6 +58,14 @@
         </el-form-item>
         <el-form-item :label="t('monitor.threshold')">
           <el-input-number v-model="form.threshold" :step="1" style="width:100%" />
+        </el-form-item>
+        <el-form-item :label="t('monitor.fireMinutes')">
+          <el-input-number v-model="form.fireMinutes" :min="0" :step="1" style="width:100%" />
+          <div class="hint">{{ t('monitor.durationHint') }}</div>
+        </el-form-item>
+        <el-form-item :label="t('monitor.recoverMinutes')">
+          <el-input-number v-model="form.recoverMinutes" :min="0" :step="1" style="width:100%" />
+          <div class="hint">{{ t('monitor.durationHint') }}</div>
         </el-form-item>
         <el-form-item :label="t('monitor.enabled')">
           <el-switch v-model="form.enabled" />
@@ -90,6 +100,8 @@ const form = reactive({
   instance: '',
   op: 'gt',
   threshold: 90,
+  fireMinutes: 3,
+  recoverMinutes: 3,
   enabled: true
 })
 
@@ -114,6 +126,8 @@ function openCreate() {
   form.instance = ''
   form.op = 'gt'
   form.threshold = 90
+  form.fireMinutes = 3
+  form.recoverMinutes = 3
   form.enabled = true
   visible.value = true
 }
@@ -125,6 +139,8 @@ function openEdit(row) {
   form.instance = row.instance || ''
   form.op = row.op
   form.threshold = row.threshold
+  form.fireMinutes = row.fireMinutes ?? 3
+  form.recoverMinutes = row.recoverMinutes ?? 3
   form.enabled = row.enabled
   visible.value = true
 }
@@ -138,6 +154,8 @@ async function save() {
       instance: form.instance,
       op: form.op,
       threshold: form.threshold,
+      fireMinutes: form.fireMinutes,
+      recoverMinutes: form.recoverMinutes,
       enabled: form.enabled
     }
     if (editing.value) {
@@ -180,5 +198,11 @@ onMounted(load)
   justify-content: flex-end;
   align-items: center;
   gap: 8px;
+}
+.hint {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.4;
 }
 </style>

@@ -17,7 +17,19 @@ public final class AlertIssueLogic {
 
     public record Point(String itemId, String instance, double value) {}
 
-    public record Rule(UUID id, String name, String itemId, String instance, String op, double threshold) {}
+    public record Rule(
+            UUID id,
+            String name,
+            String itemId,
+            String instance,
+            String op,
+            double threshold,
+            int fireMinutes,
+            int recoverMinutes) {
+        public Rule(UUID id, String name, String itemId, String instance, String op, double threshold) {
+            this(id, name, itemId, instance, op, threshold, 0, 0);
+        }
+    }
 
     public record Issue(
             String itemId,

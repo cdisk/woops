@@ -665,16 +665,9 @@ public class MetricsService {
             ignoredByAsset.computeIfAbsent(ig.getAssetId(), k -> new HashSet<>()).add(ig.getItemId());
         }
 
-        List<AlertIssueLogic.Rule> enabledRules = rules.findByEnabledTrue().stream()
-                .map(r -> new AlertIssueLogic.Rule(
-                        r.getId(), r.getName(), r.getItemId(), r.getInstance(), r.getOp(), r.getThreshold()))
-                .toList();
-        Map<UUID, List<AlertIssueLogic.Point>> latestByAsset = new HashMap<>();
-        for (MonitorLatestEntity row : latestRepo.findAll()) {
-            latestByAsset.computeIfAbsent(row.getAssetId(), k -> new ArrayList<>())
-                    .add(new AlertIssueLogic.Point(row.getItemId(), row.getInstance(), row.getValue()));
-        }
-
+        // Abnormal list follows confirmed open incidents (+ offline), not raw metric hits /
+        // fire-pending samples — same state machine as Webhook.
+        Map<UUID, List<AlertIssueLogic.Issue>> openIssuesByAsset = new HashMap<>();
         Map<String, Instant> openStartedAt = new HashMap<>();
         for (AlertIncidentEntity inc : incidents.findByResolvedAtIsNull()) {
             if (inc.getStartedAt() == null) {
@@ -683,15 +676,36 @@ public class MetricsService {
             openStartedAt.put(
                     openIncidentLookupKey(inc.getAssetId(), inc.getItemId(), inc.getInstance(), inc.getRuleId()),
                     inc.getStartedAt());
+            openIssuesByAsset
+                    .computeIfAbsent(inc.getAssetId(), k -> new ArrayList<>())
+                    .add(new AlertIssueLogic.Issue(
+                            inc.getItemId(),
+                            inc.getKind(),
+                            inc.getLabel(),
+                            inc.getInstance(),
+                            inc.getLatestValue() == null ? 0 : inc.getLatestValue(),
+                            inc.getRuleId(),
+                            inc.getRuleName(),
+                            inc.getOp(),
+                            inc.getThreshold()));
         }
 
         Map<UUID, String> groupNames = groups.nameById();
         List<Map<String, Object>> firing = new ArrayList<>();
         for (AssetEntity a : allAssets) {
-            List<AlertIssueLogic.Issue> metricHits = AlertIssueLogic.metricHits(
-                    latestByAsset.getOrDefault(a.getId(), List.of()), enabledRules);
-            List<AlertIssueLogic.Issue> visible = AlertIssueLogic.visibleIssues(
-                    a.isOnline(), metricHits, ignoredByAsset.getOrDefault(a.getId(), Set.of()));
+            Set<String> ignored = ignoredByAsset.getOrDefault(a.getId(), Set.of());
+            List<AlertIssueLogic.Issue> visible;
+            if (!a.isOnline()) {
+                visible = ignored.contains(AlertIssueLogic.ITEM_HOST_ONLINE)
+                        ? List.of()
+                        : List.of(AlertIssueLogic.offlineIssue());
+            } else {
+                List<AlertIssueLogic.Issue> open = openIssuesByAsset.getOrDefault(a.getId(), List.of());
+                visible = open.stream()
+                        .filter(i -> !AlertIssueLogic.KIND_OFFLINE.equals(i.kind()))
+                        .filter(i -> !ignored.contains(i.itemId()))
+                        .toList();
+            }
             if (visible.isEmpty()) {
                 continue;
             }
@@ -871,7 +885,15 @@ public class MetricsService {
     }
 
     @Transactional
-    public Map<String, Object> createRule(String name, String itemId, String instance, String op, double threshold, Boolean enabled) {
+    public Map<String, Object> createRule(
+            String name,
+            String itemId,
+            String instance,
+            String op,
+            double threshold,
+            Boolean enabled,
+            Integer fireMinutes,
+            Integer recoverMinutes) {
         MetricAlertRuleEntity r = new MetricAlertRuleEntity();
         r.setId(UUID.randomUUID());
         r.setName(name);
@@ -880,6 +902,8 @@ public class MetricsService {
         r.setOp(op == null || op.isBlank() ? "gt" : op);
         r.setThreshold(threshold);
         r.setEnabled(enabled == null || enabled);
+        r.setFireMinutes(AlertDurationLogic.clampMinutes(fireMinutes));
+        r.setRecoverMinutes(AlertDurationLogic.clampMinutes(recoverMinutes));
         r.setCreatedAt(Instant.now());
         r.setUpdatedAt(Instant.now());
         Map<String, Object> view = ruleView(rules.save(r));
@@ -890,7 +914,16 @@ public class MetricsService {
     }
 
     @Transactional
-    public Map<String, Object> updateRule(UUID id, String name, String itemId, String instance, String op, Double threshold, Boolean enabled) {
+    public Map<String, Object> updateRule(
+            UUID id,
+            String name,
+            String itemId,
+            String instance,
+            String op,
+            Double threshold,
+            Boolean enabled,
+            Integer fireMinutes,
+            Integer recoverMinutes) {
         MetricAlertRuleEntity r = rules.findById(id).orElseThrow(() -> new IllegalArgumentException("rule not found"));
         boolean wasEnabled = r.isEnabled();
         if (name != null && !name.isBlank()) r.setName(name);
@@ -899,8 +932,12 @@ public class MetricsService {
         if (op != null && !op.isBlank()) r.setOp(op);
         if (threshold != null) r.setThreshold(threshold);
         if (enabled != null) r.setEnabled(enabled);
+        if (fireMinutes != null) r.setFireMinutes(AlertDurationLogic.clampMinutes(fireMinutes));
+        if (recoverMinutes != null) r.setRecoverMinutes(AlertDurationLogic.clampMinutes(recoverMinutes));
         r.setUpdatedAt(Instant.now());
         MetricAlertRuleEntity saved = rules.save(r);
+        // Threshold / duration edits must not keep stale FIRE/RECOVER timers.
+        alertEval.clearPendingForRule(id);
         if (wasEnabled && !saved.isEnabled()) {
             alertEval.resolveForRuleChange(id);
         } else {
@@ -929,6 +966,8 @@ public class MetricsService {
         m.put("op", r.getOp());
         m.put("threshold", r.getThreshold());
         m.put("enabled", r.isEnabled());
+        m.put("fireMinutes", r.getFireMinutes());
+        m.put("recoverMinutes", r.getRecoverMinutes());
         m.put("updatedAt", r.getUpdatedAt().toString());
         return m;
     }

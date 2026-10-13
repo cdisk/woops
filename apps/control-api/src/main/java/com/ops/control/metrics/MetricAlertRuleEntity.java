@@ -30,6 +30,14 @@ public class MetricAlertRuleEntity {
     @Column(nullable = false)
     private boolean enabled = true;
 
+    /** Minutes a metric must match before opening an incident; 0 = immediate. */
+    @Column(name = "fire_minutes", nullable = false, columnDefinition = "integer not null default 3")
+    private int fireMinutes = AlertDurationLogic.DEFAULT_MINUTES;
+
+    /** Minutes a metric must clear before resolving; 0 = immediate. */
+    @Column(name = "recover_minutes", nullable = false, columnDefinition = "integer not null default 3")
+    private int recoverMinutes = AlertDurationLogic.DEFAULT_MINUTES;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
@@ -50,6 +58,10 @@ public class MetricAlertRuleEntity {
     public void setThreshold(double threshold) { this.threshold = threshold; }
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
+    public int getFireMinutes() { return fireMinutes; }
+    public void setFireMinutes(int fireMinutes) { this.fireMinutes = Math.max(0, fireMinutes); }
+    public int getRecoverMinutes() { return recoverMinutes; }
+    public void setRecoverMinutes(int recoverMinutes) { this.recoverMinutes = Math.max(0, recoverMinutes); }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }

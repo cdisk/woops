@@ -203,7 +203,15 @@ public class MetricsController {
         return metrics.listRules();
     }
 
-    public record RuleBody(String name, String itemId, String instance, String op, Double threshold, Boolean enabled) {}
+    public record RuleBody(
+            String name,
+            String itemId,
+            String instance,
+            String op,
+            Double threshold,
+            Boolean enabled,
+            Integer fireMinutes,
+            Integer recoverMinutes) {}
 
     @PostMapping("/monitor/alert-rules")
     public Map<String, Object> createRule(@RequestBody RuleBody body, Authentication auth) {
@@ -211,13 +219,42 @@ public class MetricsController {
         if (body.name() == null || body.name().isBlank() || body.itemId() == null || body.itemId().isBlank() || body.threshold() == null) {
             throw new IllegalArgumentException("name, itemId, threshold required");
         }
-        return metrics.createRule(body.name(), body.itemId(), body.instance(), body.op(), body.threshold(), body.enabled());
+        if (body.fireMinutes() != null && body.fireMinutes() < 0) {
+            throw new IllegalArgumentException("fireMinutes must be >= 0");
+        }
+        if (body.recoverMinutes() != null && body.recoverMinutes() < 0) {
+            throw new IllegalArgumentException("recoverMinutes must be >= 0");
+        }
+        return metrics.createRule(
+                body.name(),
+                body.itemId(),
+                body.instance(),
+                body.op(),
+                body.threshold(),
+                body.enabled(),
+                body.fireMinutes(),
+                body.recoverMinutes());
     }
 
     @PatchMapping("/monitor/alert-rules/{id}")
     public Map<String, Object> updateRule(@PathVariable UUID id, @RequestBody RuleBody body, Authentication auth) {
         access.assertCanManageAlertRules(access.requireUser(auth));
-        return metrics.updateRule(id, body.name(), body.itemId(), body.instance(), body.op(), body.threshold(), body.enabled());
+        if (body.fireMinutes() != null && body.fireMinutes() < 0) {
+            throw new IllegalArgumentException("fireMinutes must be >= 0");
+        }
+        if (body.recoverMinutes() != null && body.recoverMinutes() < 0) {
+            throw new IllegalArgumentException("recoverMinutes must be >= 0");
+        }
+        return metrics.updateRule(
+                id,
+                body.name(),
+                body.itemId(),
+                body.instance(),
+                body.op(),
+                body.threshold(),
+                body.enabled(),
+                body.fireMinutes(),
+                body.recoverMinutes());
     }
 
     @DeleteMapping("/monitor/alert-rules/{id}")
