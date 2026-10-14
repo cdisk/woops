@@ -694,13 +694,16 @@ public class MetricsService {
         List<Map<String, Object>> firing = new ArrayList<>();
         for (AssetEntity a : allAssets) {
             Set<String> ignored = ignoredByAsset.getOrDefault(a.getId(), Set.of());
+            List<AlertIssueLogic.Issue> open = openIssuesByAsset.getOrDefault(a.getId(), List.of());
             List<AlertIssueLogic.Issue> visible;
             if (!a.isOnline()) {
-                visible = ignored.contains(AlertIssueLogic.ITEM_HOST_ONLINE)
+                // Only after offline FIRE pending matured into an open incident.
+                boolean confirmedOffline = open.stream()
+                        .anyMatch(i -> AlertIssueLogic.KIND_OFFLINE.equals(i.kind()));
+                visible = (!confirmedOffline || ignored.contains(AlertIssueLogic.ITEM_HOST_ONLINE))
                         ? List.of()
                         : List.of(AlertIssueLogic.offlineIssue());
             } else {
-                List<AlertIssueLogic.Issue> open = openIssuesByAsset.getOrDefault(a.getId(), List.of());
                 visible = open.stream()
                         .filter(i -> !AlertIssueLogic.KIND_OFFLINE.equals(i.kind()))
                         .filter(i -> !ignored.contains(i.itemId()))

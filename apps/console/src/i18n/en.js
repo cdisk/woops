@@ -641,7 +641,7 @@ export default {
     threshold: 'Threshold',
     fireMinutes: 'Fire for (min)',
     recoverMinutes: 'Recover for (min)',
-    durationHint: 'Minutes the condition must hold; 0 = immediate. Offline/online ignores this.',
+    durationHint: 'Minutes the condition must hold; 0 = immediate. Offline/online uses a fixed 1-minute buffer (not this field).',
     enabled: 'Enabled',
     editRule: 'Edit rule',
     createRule: 'Add rule',

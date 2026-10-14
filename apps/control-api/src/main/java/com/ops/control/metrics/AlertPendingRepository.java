@@ -11,6 +11,9 @@ import java.util.UUID;
 public interface AlertPendingRepository extends JpaRepository<AlertPendingEntity, AlertPendingId> {
     List<AlertPendingEntity> findByAssetId(UUID assetId);
 
+    @Query("select distinct p.assetId from AlertPendingEntity p")
+    List<UUID> findDistinctAssetIds();
+
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("delete from AlertPendingEntity p where p.assetId = :assetId")
     int deleteByAssetId(@Param("assetId") UUID assetId);

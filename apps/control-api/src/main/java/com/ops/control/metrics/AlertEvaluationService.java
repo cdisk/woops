@@ -100,7 +100,8 @@ public class AlertEvaluationService {
 
         Map<String, AlertPendingEntity> pendingByKey = new HashMap<>();
         for (AlertPendingEntity p : pendings.findByAssetId(assetId)) {
-            pendingByKey.put(AlertIssueLogic.issueKey(p.getItemId(), p.getInstance(), p.getRuleId()), p);
+            pendingByKey.put(
+                    AlertDurationLogic.pendingMapKey(p.getItemId(), p.getInstance(), p.getRuleId()), p);
         }
 
         Set<String> seen = new HashSet<>();
@@ -109,7 +110,9 @@ public class AlertEvaluationService {
             seen.add(key);
             AlertIncidentEntity existing = openByKey.get(key);
             boolean offlineIssue = AlertIssueLogic.KIND_OFFLINE.equals(issue.kind());
-            int fireMinutes = offlineIssue ? 0 : fireMinutesOf(issue.ruleId(), ruleById);
+            int fireMinutes = offlineIssue
+                    ? AlertDurationLogic.OFFLINE_FIRE_MINUTES
+                    : fireMinutesOf(issue.ruleId(), ruleById);
 
             if (existing != null) {
                 // Rematch while open: cancel recover wait and refresh.
@@ -153,7 +156,14 @@ public class AlertEvaluationService {
             String reason = resolveReason(inc, opts.goneLatestKeys(), wentOffline);
             AlertIssueLogic.Issue issue = toIssue(inc);
             boolean immediate = AlertDurationLogic.isImmediateCloseReason(inc.getKind(), reason);
-            int recoverMinutes = immediate ? 0 : recoverMinutesOf(inc.getRuleId(), ruleById);
+            int recoverMinutes;
+            if (immediate) {
+                recoverMinutes = 0;
+            } else if (AlertIssueLogic.KIND_OFFLINE.equals(inc.getKind())) {
+                recoverMinutes = AlertDurationLogic.OFFLINE_RECOVER_MINUTES;
+            } else {
+                recoverMinutes = recoverMinutesOf(inc.getRuleId(), ruleById);
+            }
 
             if (recoverMinutes <= 0) {
                 clearPending(pendingByKey, assetId, issue);
@@ -184,7 +194,7 @@ public class AlertEvaluationService {
             if (!AlertPendingEntity.PHASE_FIRE.equals(p.getPhase())) {
                 continue;
             }
-            String key = AlertIssueLogic.issueKey(p.getItemId(), p.getInstance(), p.getRuleId());
+            String key = AlertDurationLogic.pendingMapKey(p.getItemId(), p.getInstance(), p.getRuleId());
             if (!seen.contains(key)) {
                 pendings.delete(p);
                 pendingByKey.remove(key);
@@ -324,7 +334,8 @@ public class AlertEvaluationService {
             AlertIssueLogic.Issue issue,
             String phase,
             Instant now) {
-        if (issue.ruleId() == null) {
+        UUID ruleId = AlertDurationLogic.pendingRuleId(issue);
+        if (ruleId == null) {
             return;
         }
         String key = AlertIssueLogic.issueKey(issue);
@@ -332,7 +343,7 @@ public class AlertEvaluationService {
         if (p == null) {
             p = new AlertPendingEntity();
             p.setAssetId(assetId);
-            p.setRuleId(issue.ruleId());
+            p.setRuleId(ruleId);
             p.setItemId(issue.itemId());
             p.setInstance(issue.instance());
             p.setPhase(phase);
@@ -350,7 +361,8 @@ public class AlertEvaluationService {
 
     private void clearPending(
             Map<String, AlertPendingEntity> pendingByKey, UUID assetId, AlertIssueLogic.Issue issue) {
-        if (issue.ruleId() == null) {
+        UUID ruleId = AlertDurationLogic.pendingRuleId(issue);
+        if (ruleId == null) {
             return;
         }
         String key = AlertIssueLogic.issueKey(issue);
@@ -358,7 +370,7 @@ public class AlertEvaluationService {
         if (p != null) {
             pendings.delete(p);
         } else {
-            pendings.deleteOne(assetId, issue.ruleId(), issue.itemId(), issue.instance() == null ? "" : issue.instance());
+            pendings.deleteOne(assetId, ruleId, issue.itemId(), issue.instance() == null ? "" : issue.instance());
         }
     }
 
@@ -382,12 +394,6 @@ public class AlertEvaluationService {
     private static List<AlertIssueLogic.Issue> statusIssuesFromOpen(
             AssetEntity asset, Collection<AlertIncidentEntity> open, Set<String> ignored) {
         Set<String> ig = ignored == null ? Set.of() : ignored;
-        if (!asset.isOnline()) {
-            if (ig.contains(AlertIssueLogic.ITEM_HOST_ONLINE)) {
-                return List.of();
-            }
-            return List.of(AlertIssueLogic.offlineIssue());
-        }
         List<AlertIssueLogic.Issue> out = new ArrayList<>();
         for (AlertIncidentEntity inc : open) {
             if (!inc.isOpen()) {
@@ -397,6 +403,13 @@ public class AlertEvaluationService {
                 continue;
             }
             if (AlertIssueLogic.KIND_OFFLINE.equals(inc.getKind())) {
+                // Confirmed offline incident only (FIRE pending not yet open).
+                if (!asset.isOnline() && !ig.contains(AlertIssueLogic.ITEM_HOST_ONLINE)) {
+                    out.add(AlertIssueLogic.offlineIssue());
+                }
+                continue;
+            }
+            if (!asset.isOnline()) {
                 continue;
             }
             out.add(toIssue(inc));

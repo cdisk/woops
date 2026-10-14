@@ -4,7 +4,7 @@
 > 任何功能新增、完成、搁置、行为变更，都必须先读本文件，并在同一变更中更新对应条目的状态与说明。  
 > README 只保留快速启动。历史设计稿 `bastion_architecture_design_*.plan.md` 不必再读。
 
-**最后更新：** 2026-10-13（告警历史增加 IP 列）
+**最后更新：** 2026-10-14（离线/上线告警默认 1 分钟缓冲）
 
 ---
 
@@ -126,7 +126,7 @@
 | `[x]` | 监控 Timescale history + trends | **`monitor_history`**（分钟明细 hypertable，近 **7** 天可配）+ **`monitor_trends`**（小时 `min/max/avg/sample_count`，保留 **3** 年可配）；字典 `monitor_item_def`；每小时汇集上一小时并删除超期明细；压缩策略由启动引导自动加；旧表名 `monitor_data` 已迁完。**查询索引** `idx_monitor_history_series`（`asset_id,item_id,time,instance`）由 `MetricsIndexMigrator` 启动时后台建、按 advisory lock 去重、每次启动幂等重试：**hypertable 上必须用 `WITH (timescaledb.transaction_per_chunk)`**，`CREATE INDEX CONCURRENTLY` 会被 TimescaleDB 拒绝（`hypertables do not support concurrent index creation`，SQLSTATE `0A000` 还会让 Hikari 弃掉该连接）；仅未转换的普通表才走 CONCURRENTLY |
 | `[x]` | 监控曲线 / 聚合 | `GET …/metrics/series`；grain=minute\|hour\|day\|month；选表：起点在明细保留窗内且跨度≤保留窗 → history，否则 trends（跨边界混合未汇总 history）；trends **按 `sample_count` 加权平均**；响应含服务端 `summaries`（min/avg/max/sampleCount，不随显示粒度变；断线缺口不进均值分母）；磁盘/网卡按 instance 拆分。控制台曲线页直接展示该 summary |
 | `[x]` | 指标统计报表 API | `POST /api/reports/metrics`：单资产、多 `itemId`、`[from,to)`、`hour\|day` 等粒度；一次返回区间统计 + 趋势 `points`（`time`/`value`/`min`/`max`，由调用方绘图）；JWT 或 `metrics:read` API Token；控制审计 `MONITOR`/`REPORT_READ`（不记 points/secret）。调用示例 [`docs/metrics-report-api.md`](docs/metrics-report-api.md) |
-| `[x]` | 监控预警 | 全局阈值（优先 %）；入库评估；`asset_alert_status`；配置 CRUD；**仅超管**可见菜单与 API。首页异常含离线；忽略按 **资产+监控项**（`asset_alert_ignores`，离线项 `host.online`；忽略是展示/通知策略，不关闭客观 incident）。指标规则可配 **`fireMinutes` / `recoverMinutes`**（默认 **3**，`0`=立即）：连续满足才开/关 incident 并推 Webhook；表 `alert_pending` 落库计时（重启不丢）；首页异常与 Webhook 共用同一状态机（pending 未满时不进异常列表）。**离线/上线立即**；`INSTANCE_GONE` / `ASSET_OFFLINE` / `RULE_CHANGED` 立即关。改规则阈值或持续时间时清该规则 pending |
+| `[x]` | 监控预警 | 全局阈值（优先 %）；入库评估；`asset_alert_status`；配置 CRUD；**仅超管**可见菜单与 API。首页异常含离线；忽略按 **资产+监控项**（`asset_alert_ignores`，离线项 `host.online`；忽略是展示/通知策略，不关闭客观 incident）。指标规则可配 **`fireMinutes` / `recoverMinutes`**（默认 **3**，`0`=立即）：连续满足才开/关 incident 并推 Webhook；表 `alert_pending` 落库计时（重启不丢）；首页异常与 Webhook 共用同一状态机（pending 未满时不进异常列表）。**离线/上线默认各缓冲 1 分钟**（固定，非规则字段；`AlertPendingSweepJob` 每 15s 扫 pending，因离线无 metrics 上报）；`INSTANCE_GONE` / `ASSET_OFFLINE` / `RULE_CHANGED` 立即关。改规则阈值或持续时间时清该规则 pending |
 | `[x]` | 告警 Webhook | **仅超管** CRUD 端点（URL + Bearer Token + 启停 + 范围 `ALL`/`GROUP`/`ASSET`）；firing/resolved；payload 含 `privateIp`（资产内网 IP，多地址逗号分隔）与按显式 `user_scopes` 解析的负责人（`SUPER_ADMIN` 隐式全量不计入）；全局 ignore 期间不投递；取消 ignore 且仍异常时补发 firing。控制台「测试」推送与 firing **同形、字段齐全**的样例（`event=test`，固定示例资产/告警字段，`recipients` 含当前操作者）。无 MQ：`alert_notify_outbox` + 定时重试。企业微信适配由**外部桥接程序**完成（Woops 不同步企微通讯录）。控制台「通知」页有 **接口说明** 弹窗（`features/monitor/webhookDoc{,.en}.md`，一语言一文件，可复制全文） |
 | `[x]` | 告警 incident | 表 `alert_incidents` 记录客观生命周期（开始/最后命中/恢复、值、规则快照、`resolution_reason`：`NORMAL`/`INSTANCE_GONE`/`ASSET_OFFLINE`/`RULE_CHANGED`）；与 ignore 表分离；指标开/关受规则持续分钟约束（见监控预警）。`GET /api/monitor/alert-incidents` 分页，按用户资产可见范围（含 `privateIp`/`publicIp`）；控制台「告警历史」列表在分组后有 **IP** 列（内网主、公网次，同首页） |
 | `[x]` | 指标实例对账 | Agent 上报 `completeFamilies`（`disk`/`diskio`/`net`，仅对应枚举成功时声明）；ingest 删除该族本轮不存在的 `monitor_latest` 行（保留 history/trends）；触发 `INSTANCE_GONE` 恢复。老 Agent 无该字段则只 upsert、不推断消失 |

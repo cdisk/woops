@@ -42,8 +42,8 @@ class AlertDurationLogicTest {
     }
 
     @Test
-    void offlineAndSpecialReasonsCloseImmediately() {
-        assertTrue(AlertDurationLogic.isImmediateCloseReason(
+    void specialReasonsCloseImmediatelyButOfflineNormalUsesBuffer() {
+        assertFalse(AlertDurationLogic.isImmediateCloseReason(
                 AlertIssueLogic.KIND_OFFLINE, AlertIncidentEntity.REASON_NORMAL));
         assertTrue(AlertDurationLogic.isImmediateCloseReason(
                 AlertIssueLogic.KIND_METRIC, AlertIncidentEntity.REASON_INSTANCE_GONE));
@@ -53,6 +53,24 @@ class AlertDurationLogicTest {
                 AlertIssueLogic.KIND_METRIC, AlertIncidentEntity.REASON_RULE_CHANGED));
         assertFalse(AlertDurationLogic.isImmediateCloseReason(
                 AlertIssueLogic.KIND_METRIC, AlertIncidentEntity.REASON_NORMAL));
+    }
+
+    @Test
+    void offlineDefaultsOneMinute() {
+        assertEquals(1, AlertDurationLogic.OFFLINE_FIRE_MINUTES);
+        assertEquals(1, AlertDurationLogic.OFFLINE_RECOVER_MINUTES);
+        Instant since = Instant.parse("2026-10-14T08:00:00Z");
+        assertFalse(AlertDurationLogic.heldLongEnough(since, since.plusSeconds(59), 1));
+        assertTrue(AlertDurationLogic.heldLongEnough(since, since.plusSeconds(60), 1));
+    }
+
+    @Test
+    void offlinePendingMapKeyNormalizesSentinel() {
+        String withNull = AlertIssueLogic.issueKey(
+                AlertIssueLogic.ITEM_HOST_ONLINE, "", null);
+        String withSentinel = AlertDurationLogic.pendingMapKey(
+                AlertIssueLogic.ITEM_HOST_ONLINE, "", AlertDurationLogic.OFFLINE_PENDING_RULE_ID);
+        assertEquals(withNull, withSentinel);
     }
 
     @Test
