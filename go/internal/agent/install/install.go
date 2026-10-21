@@ -75,16 +75,27 @@ func runInstall(opts Options) error {
 	logf.Printf("==> Published install-code")
 
 	// Copy self into install path only when we are not already that file.
+	// A live Windows service has woops-agent.exe (and, below build 17763, winpty.dll)
+	// mapped. Replacing those in place returns Access Denied or a sharing violation,
+	// so stage beside them and swap only after the detached restart stops the service.
 	if !sameFile(self, p.Bin) {
-		if err := InstallBinary(self, p.Bin, p.BinOld); err != nil {
-			return fmt.Errorf("install binary: %w", err)
+		if live && runtime.GOOS == "windows" {
+			staged := filepath.Join(p.BinDir, "woops-agent-new.exe")
+			if err := copyFile(self, staged); err != nil {
+				return fmt.Errorf("stage binary: %w", err)
+			}
+			logf.Printf("==> Staged binary %s", staged)
+		} else {
+			if err := InstallBinary(self, p.Bin, p.BinOld); err != nil {
+				return fmt.Errorf("install binary: %w", err)
+			}
+			logf.Printf("==> Installed binary %s", p.Bin)
 		}
-		logf.Printf("==> Installed binary %s", p.Bin)
 	} else {
 		logf.Printf("==> Binary already at install path")
 	}
 
-	if err := ensureWinpty(p, opts.Gateway, opts.Code, opts.Pin); err != nil {
+	if err := ensureWinpty(p, opts.Gateway, opts.Code, opts.Pin, live); err != nil {
 		return fmt.Errorf("winpty: %w", err)
 	}
 
@@ -141,8 +152,17 @@ func runRestartPhase(opts Options) error {
 	_ = StopService()
 	time.Sleep(2 * time.Second)
 
-	// Promote any leftover staged copies from older script installers.
-	_ = promoteLegacyStaged(p)
+	// Promote staged copies after the service (and its file locks) are gone.
+	if err := promoteLegacyStaged(p); err != nil {
+		logf.Printf("promote staged binary: %v", err)
+		_ = StartService()
+		return err
+	}
+	if err := swapWinptyAfterStop(p); err != nil {
+		logf.Printf("promote staged winpty: %v", err)
+		_ = StartService()
+		return err
+	}
 
 	if err := StartService(); err != nil {
 		logf.Printf("start failed: %v; attempting rollback", err)
@@ -199,11 +219,46 @@ func promoteLegacyStaged(p Paths) error {
 		candidates = append(candidates, filepath.Join(p.BinDir, "woops-agent-new.exe"))
 	}
 	for _, c := range candidates {
-		if _, err := os.Stat(c); err == nil {
-			_ = os.Remove(p.BinOld)
-			_ = os.Rename(p.Bin, p.BinOld)
-			return os.Rename(c, p.Bin)
+		if _, err := os.Stat(c); err != nil {
+			continue
 		}
+		if err := replaceStaged(c, p.Bin); err != nil {
+			return err
+		}
+		return nil
+	}
+	return nil
+}
+
+// replaceStaged moves src onto dst, keeping the previous dst as dst+".old" when
+// dst already exists. A missing src is a no-op.
+func replaceStaged(src, dst string) error {
+	if _, err := os.Stat(src); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	if err := os.MkdirAll(dirOf(dst), 0o755); err != nil {
+		return err
+	}
+	backedUp := false
+	if _, err := os.Stat(dst); err == nil {
+		old := dst + ".old"
+		_ = os.Remove(old)
+		if err := os.Rename(dst, old); err != nil {
+			return fmt.Errorf("backup %s: %w", dst, err)
+		}
+		backedUp = true
+	}
+	if err := os.Rename(src, dst); err != nil {
+		if copyErr := copyFile(src, dst); copyErr != nil {
+			if backedUp {
+				_ = os.Rename(dst+".old", dst)
+			}
+			return fmt.Errorf("replace %s: rename=%v copy=%v", dst, err, copyErr)
+		}
+		_ = os.Remove(src)
 	}
 	return nil
 }

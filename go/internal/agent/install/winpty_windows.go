@@ -55,12 +55,14 @@ func windowsBuildNumber() int {
 	return int(info.BuildNumber)
 }
 
-func ensureWinpty(p Paths, gateway, code, pin string) error {
+func ensureWinpty(p Paths, gateway, code, pin string, live bool) error {
 	build := windowsBuildNumber()
 	if build == 0 || build >= 17763 {
-		// ConPTY available; remove leftover winpty from older installs.
-		_ = os.Remove(filepath.Join(p.BinDir, "winpty.dll"))
-		_ = os.Remove(filepath.Join(p.BinDir, "winpty-agent.exe"))
+		// ConPTY available. A live process may still have the DLL mapped, so
+		// leave deletion to swapWinptyAfterStop.
+		if !live {
+			removeWinptyFiles(p)
+		}
 		return nil
 	}
 	client, err := tlsutil.HTTPClient(tlsutil.DialOptions{Pin: pin}, 60*time.Second)
@@ -71,11 +73,44 @@ func ensureWinpty(p Paths, gateway, code, pin string) error {
 	for _, name := range []string{"winpty.dll", "winpty-agent.exe"} {
 		url := base + name
 		dest := filepath.Join(p.BinDir, name)
+		if live {
+			dest = stagedWinptyPath(p, name)
+		}
 		if err := downloadFile(client, url, dest); err != nil {
 			return fmt.Errorf("winpty %s: %w", name, err)
 		}
 	}
 	return nil
+}
+
+// swapWinptyAfterStop runs only after the agent process has exited.
+func swapWinptyAfterStop(p Paths) error {
+	build := windowsBuildNumber()
+	if build == 0 || build >= 17763 {
+		removeWinptyFiles(p)
+		return nil
+	}
+	if err := replaceStaged(stagedWinptyPath(p, "winpty.dll"), filepath.Join(p.BinDir, "winpty.dll")); err != nil {
+		return err
+	}
+	return replaceStaged(stagedWinptyPath(p, "winpty-agent.exe"), filepath.Join(p.BinDir, "winpty-agent.exe"))
+}
+
+func stagedWinptyPath(p Paths, name string) string {
+	switch name {
+	case "winpty.dll":
+		return filepath.Join(p.BinDir, "winpty-new.dll")
+	case "winpty-agent.exe":
+		return filepath.Join(p.BinDir, "winpty-agent-new.exe")
+	default:
+		return filepath.Join(p.BinDir, name)
+	}
+}
+
+func removeWinptyFiles(p Paths) {
+	for _, name := range []string{"winpty.dll", "winpty-agent.exe", "winpty-new.dll", "winpty-agent-new.exe"} {
+		_ = os.Remove(filepath.Join(p.BinDir, name))
+	}
 }
 
 func downloadFile(client *http.Client, url, dest string) error {

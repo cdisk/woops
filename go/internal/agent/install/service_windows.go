@@ -127,7 +127,12 @@ func AgentLive() bool {
 }
 
 func killAgentProcesses() {
-	_ = exec.Command("taskkill", "/F", "/IM", "woops-agent.exe").Run()
+	// The process image name is fixed at launch, so an agent whose exe was later
+	// renamed to .old still matches woops-agent.exe. winpty-agent.exe is the
+	// WinPTY helper child and can outlive the agent while holding winpty.dll.
+	for _, image := range []string{"woops-agent.exe", "winpty-agent.exe"} {
+		_ = exec.Command("taskkill", "/F", "/IM", image).Run()
+	}
 }
 
 func processNamedRunning(exe string) bool {

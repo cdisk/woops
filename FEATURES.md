@@ -4,7 +4,7 @@
 > 任何功能新增、完成、搁置、行为变更，都必须先读本文件，并在同一变更中更新对应条目的状态与说明。  
 > README 只保留快速启动。历史设计稿 `bastion_architecture_design_*.plan.md` 不必再读。
 
-**最后更新：** 2026-10-21（首页拓扑改为 Gateway 居中、分组环绕、组内直线上下级树、方块节点）
+**最后更新：** 2026-10-21（Windows 在线更新改为停服务后再替换 exe / WinPTY，避免文件被占用）
 
 ---
 
@@ -138,7 +138,7 @@
 | `[x]` | Proxy Bridge 反向载波 | 独立 camelCase `proxyBridge.*`（enabled/listen/key/allowGlobal/targets[address,key]），实现复用 `plugins/proxy` engine；用于 **A 只能主动连 B** 的网络：A targets 主动 TCP 连 B listen，HMAC-SHA256 双向随机挑战认证（64 hex key），yamux 多路承载标准 HTTP forward/CONNECT。B 的 `gatewayProxy` 指向本机 `proxy.listen`，Proxy 父载波优先；A 可 `proxy.enabled=false` 只开 Bridge targets，并继承 A 自己的 `gatewayProxy` 出口。`proxy.allowGlobal` 管普通 listener，`proxyBridge.allowGlobal` 管 peer 流；默认仅 Gateway，全局仍拒 loopback/link-local/metadata。支持 listen+targets 多级 A→B→C、TCP/应用心跳、1–30s 抖动重连；Gateway TLS/WSS 与 pin 端到端不变 |
 | `[x]` | Agent 本地文件日志 | `woops-agent.log`：启动/控制与 metrics 连断、会话 `op START/END/FAIL`；**不**记成功 netinfo / monitor 周期 sent。`proxy.enabled=true` 另开 `proxy.log`（请求 START/END/FAIL、耗时、字节；无凭据/header/body/query）。Linux `/var/log/woops-agent/`；Windows `%ProgramData%\woops-agent\`。lumberjack：50MiB 轮转、压缩、`MaxAge=90`（最长约 90 天）。同步 stderr/journald |
 | `[x]` | 安装命令带 proxy URL / 读环境变量写入配置 | 安装：`curl`/`curl.exe` 认 `https_proxy`/`http_proxy`/`ALL_PROXY`；`woops-agent install` 写入 `agent.yaml` `gatewayProxy`；控制台弹窗说明单引号与密码百分号编码 |
-| `[x]` | Windows 安装 | 一行命令下载 `woops-agent.exe` 后 `install`（管理员）；OS build &lt; 17763 自动下 WinPTY；注册 Service `woops-agent`；过渡期仍保留 `install.ps1`/`install.bat` |
+| `[x]` | Windows 安装 | 一行命令下载 `woops-agent.exe` 后 `install`（管理员）；OS build &lt; 17763 自动下 WinPTY；注册 Service `woops-agent`；过渡期仍保留 `install.ps1`/`install.bat`。**在线更新**不覆盖正在运行的 `woops-agent.exe`，也不覆盖已加载的 `winpty.dll`（会 Access denied 或共享冲突）：先落到 `woops-agent-new.exe` 与 `winpty-new.dll`，detached 重启阶段停服务并结束 `woops-agent.exe` / `winpty-agent.exe` 后再换上 |
 | `[!]` | Linux Agent 交叉编译 | 勿用本机 `GOOS=linux`（曾 segfault）；用 Linux 容器 `go build` |
 
 ---

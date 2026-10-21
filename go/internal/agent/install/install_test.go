@@ -40,6 +40,42 @@ func TestInstallBinaryAndRestore(t *testing.T) {
 	}
 }
 
+func TestPromoteStagedBinary(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "woops-agent.exe")
+	staged := bin + "-new"
+	if runtime.GOOS == "windows" {
+		staged = filepath.Join(dir, "woops-agent-new.exe")
+	}
+	p := Paths{BinDir: dir, Bin: bin, BinOld: bin + ".old"}
+	if err := os.WriteFile(bin, []byte("old-bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(staged, []byte("new-bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := promoteLegacyStaged(p); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(bin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "new-bin" {
+		t.Fatalf("bin=%q", got)
+	}
+	bak, err := os.ReadFile(bin + ".old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(bak) != "old-bin" {
+		t.Fatalf("old=%q", bak)
+	}
+	if _, err := os.Stat(staged); !os.IsNotExist(err) {
+		t.Fatalf("staged file still present: %v", err)
+	}
+}
+
 func TestWaitRegistered(t *testing.T) {
 	dir := t.TempDir()
 	p := Paths{
