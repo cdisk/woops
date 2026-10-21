@@ -23,4 +23,8 @@ public interface AssetRepository extends JpaRepository<AssetEntity, UUID> {
     @Modifying
     @Query("update AssetEntity a set a.groupId = null where a.groupId = :groupId")
     int clearGroupId(@Param("groupId") UUID groupId);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update AssetEntity a set a.updateUpstreamAssetId = null where a.updateUpstreamAssetId = :id")
+    int clearUpdateUpstream(@Param("id") UUID id);
 }

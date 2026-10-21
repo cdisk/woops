@@ -35,6 +35,8 @@ const props = defineProps({
   width: { type: String, default: '' },
   /** When set, use these assets instead of fetching (still loads groups). */
   assets: { type: Array, default: null },
+  /** Asset ids that must not appear (for example the hosts being edited). */
+  excludeIds: { type: Array, default: () => [] },
   showOnline: { type: Boolean, default: false }
 })
 
@@ -52,9 +54,12 @@ const treeProps = {
   disabled: 'disabled'
 }
 
-const effectiveAssets = computed(() =>
-  Array.isArray(props.assets) ? props.assets : loadedAssets.value
-)
+const effectiveAssets = computed(() => {
+  const list = Array.isArray(props.assets) ? props.assets : loadedAssets.value
+  const excluded = new Set((props.excludeIds || []).map((id) => String(id)))
+  if (!excluded.size) return list
+  return list.filter((asset) => !excluded.has(String(asset.id)))
+})
 
 const treeData = computed(() =>
   buildAssetSelectTree(groups.value, effectiveAssets.value, {

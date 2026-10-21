@@ -1,7 +1,20 @@
 <template>
-  <aside class="tree-pane">
-    <div class="pane-title">{{ t('groups.title') }}</div>
+  <aside class="tree-pane" :class="{ 'is-collapsed': collapsed }">
+    <div class="pane-title">
+      <span v-if="!collapsed">{{ t('groups.title') }}</span>
+      <button
+        type="button"
+        class="pane-toggle"
+        :title="collapsed ? t('groups.expand') : t('groups.collapse')"
+        :aria-label="collapsed ? t('groups.expand') : t('groups.collapse')"
+        @click="toggleCollapsed"
+      >
+        <IconFolders v-if="collapsed" :size="16" stroke="1.75" />
+        <IconChevronLeft v-else :size="16" stroke="1.75" />
+      </button>
+    </div>
     <el-tree
+      v-show="!collapsed"
       ref="treeRef"
       :data="treeData"
       node-key="key"
@@ -55,7 +68,7 @@ export const ALL_KEY = '__all__'
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { IconChevronDown } from '@tabler/icons-vue'
+import { IconChevronDown, IconChevronLeft, IconFolders } from '@tabler/icons-vue'
 import api from '../../shared/api'
 import { canManageInventory, isSuperAdmin } from '../../shared/auth'
 
@@ -69,6 +82,13 @@ const { t } = useI18n()
 
 /** Same as exported ALL_KEY; local copy for setup logic (defineProps default cannot use locals). */
 const ALL_KEY = '__all__'
+const COLLAPSE_KEY = 'ops.assets.groupTree.collapsed'
+const collapsed = ref(localStorage.getItem(COLLAPSE_KEY) === '1')
+
+function toggleCollapsed() {
+  collapsed.value = !collapsed.value
+  localStorage.setItem(COLLAPSE_KEY, collapsed.value ? '1' : '0')
+}
 
 const groupTree = ref([])
 const treeRef = ref(null)
@@ -218,10 +238,40 @@ defineExpose({
   width: 280px; flex-shrink: 0; border: 1px solid var(--ops-border); border-radius: var(--ops-radius);
   background: var(--ops-bg-surface);
   padding: 8px; overflow: auto;
+  transition: width 0.2s ease;
+}
+.tree-pane.is-collapsed {
+  width: 44px;
+  padding: 8px 4px;
+  overflow: hidden;
 }
 .pane-title {
-  font-weight: 600; margin-bottom: 8px; font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: var(--ops-text);
 }
+.is-collapsed .pane-title { justify-content: center; margin-bottom: 0; }
+.pane-toggle {
+  appearance: none;
+  border: 1px solid var(--ops-border);
+  background: var(--ops-bg-surface);
+  color: var(--ops-text-secondary);
+  width: 24px;
+  height: 24px;
+  border-radius: var(--ops-radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  box-shadow: var(--ops-shadow-sm);
+}
+.pane-toggle:hover { color: var(--ops-color-primary); border-color: var(--ops-color-primary); }
 .tree-node { display: flex; align-items: center; justify-content: space-between; width: 100%; padding-right: 4px; gap: 4px; }
 .tree-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .tree-actions {

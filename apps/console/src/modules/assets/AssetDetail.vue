@@ -174,13 +174,13 @@ import { IconClipboardList, IconDeviceFloppy, IconRefresh, IconTrash } from '@ta
 import api from '../../shared/api'
 import PortMapPanel from '../../features/portmap/PortMapPanel.vue'
 import DeployTokenPanel from './DeployTokenPanel.vue'
-import { openExecWs } from '../../features/exec/execWs'
+import { runAgentUpdate } from './agentUpdate'
 import {
   ASSET_EVENTS_AUDIT_PATH,
   CONTROL_AUDIT_PATH,
   OPERATIONS_AUDIT_PATH
 } from '../../features/audit/routes'
-import { isLegacyWindows, isWindows as assetIsWindows } from '../../session/assetOs'
+import { isWindows as assetIsWindows } from '../../session/assetOs'
 
 const props = defineProps({
   assetId: { type: String, required: true }
@@ -205,13 +205,7 @@ const execStatusText = ref('')
 const execStatusKind = ref('info')
 const execVerifyRemainSec = ref(0)
 const execLogRef = ref(null)
-let execHandle = null
-let execVerifyTimer = null
-let execVerifyInFlight = false
-let execVerifyGeneration = 0
-
-const AGENT_UPDATE_VERIFY_MS = 120_000
-const AGENT_UPDATE_VERIFY_INTERVAL_MS = 1000
+const updateSession = { aborted: false, closers: new Set() }
 
 function setExecStatus(kind, text) {
   execStatusKind.value = kind || 'info'
@@ -231,7 +225,6 @@ const form = reactive({
 })
 
 const isWindows = computed(() => assetIsWindows(asset.value))
-const isLegacyWin = computed(() => isLegacyWindows(asset.value))
 
 const groupSelectData = computed(() => mapGroups(groupTree.value))
 
@@ -382,177 +375,19 @@ function appendExecLog(chunk) {
   })
 }
 
-function closeExecWs() {
-  if (execHandle) {
-    execHandle.close()
-    execHandle = null
+function abortAgentUpdate() {
+  updateSession.aborted = true
+  for (const close of updateSession.closers) {
+    try { close() } catch { /* already closed */ }
   }
-}
-
-function stopAgentUpdateVerify() {
-  if (execVerifyTimer != null) {
-    clearInterval(execVerifyTimer)
-    execVerifyTimer = null
-  }
-  execVerifyInFlight = false
+  updateSession.closers.clear()
 }
 
 function onExecDialogClosed() {
-  execVerifyGeneration += 1
-  stopAgentUpdateVerify()
-  closeExecWs()
+  abortAgentUpdate()
   execRunning.value = false
   execStatusKind.value = 'info'
   execVerifyRemainSec.value = 0
-}
-
-/**
- * After exec finishes (or disconnects on Agent restart), poll asset every 1s:
- * refresh online + agentVersion on this page (and list via changed) until
- * online with a new version, or timeout.
- */
-function waitAgentUpdateResult(fromVer) {
-  const baseline = String(fromVer || '').trim()
-  stopAgentUpdateVerify()
-  const gen = ++execVerifyGeneration
-  execVerifyRemainSec.value = Math.ceil(AGENT_UPDATE_VERIFY_MS / 1000)
-  setExecStatus('verifying', t('assets.verifyingStatus'))
-  appendExecLog('\n[verify] polling asset status every 1s…\n')
-
-  return new Promise((resolve) => {
-    const started = Date.now()
-    let lastOnline = asset.value?.online
-    let lastVersion = asset.value?.agentVersion || ''
-    let sawOffline = !lastOnline
-    let settled = false
-
-    const finish = (result) => {
-      if (settled) return
-      settled = true
-      stopAgentUpdateVerify()
-      resolve(result)
-    }
-
-    const tick = async () => {
-      if (settled) return
-      if (gen !== execVerifyGeneration || !execDialogVisible.value) {
-        finish('aborted')
-        return
-      }
-      if (execVerifyInFlight) return
-      execVerifyInFlight = true
-      try {
-        const remain = Math.max(0, Math.ceil((AGENT_UPDATE_VERIFY_MS - (Date.now() - started)) / 1000))
-        execVerifyRemainSec.value = remain
-
-        const { data: a } = await api.get(`/assets/${props.assetId}`)
-        if (settled || gen !== execVerifyGeneration || !execDialogVisible.value) {
-          finish('aborted')
-          return
-        }
-        const ver = a.agentVersion || ''
-        const online = !!a.online
-        if (!online) sawOffline = true
-
-        const versionChanged = !!(baseline && ver && ver !== baseline)
-          || (!baseline && !!ver && ver !== lastVersion)
-        const onlineChanged = online !== lastOnline
-        const verFieldChanged = ver !== lastVersion
-        if (onlineChanged || verFieldChanged) {
-          applyAsset(a)
-          emit('changed')
-        } else {
-          asset.value = { ...asset.value, ...a, online, agentVersion: ver }
-        }
-        lastOnline = online
-        lastVersion = ver
-
-        const elapsed = Math.round((Date.now() - started) / 1000)
-        setExecStatus(
-          'verifying',
-          t('assets.statusWaitVersion', {
-            online: online ? t('common.online') : t('common.offline'),
-            ver: ver || t('common.emDash'),
-            elapsed
-          })
-        )
-
-        if (online && versionChanged) {
-          execVerifyRemainSec.value = 0
-          setExecStatus(
-            'success',
-            baseline
-              ? t('assets.onlineWithPrev', { ver, baseline })
-              : t('assets.onlineWithVer', { ver })
-          )
-          appendExecLog(`[ok] online agentVersion=${ver}${baseline ? ` (was ${baseline})` : ''}\n`)
-          ElMessage.success(t('assets.agentUpdated', { ver }))
-          applyAsset(a)
-          emit('changed')
-          finish('ok')
-          return
-        }
-
-        if (online && sawOffline && baseline && ver === baseline && elapsed >= 8) {
-          execVerifyRemainSec.value = 0
-          setExecStatus('warn', t('assets.versionUnchangedStatus', { ver }))
-          appendExecLog(`[warn] online again but agentVersion unchanged (${ver})\n`)
-          ElMessage.warning(t('assets.versionUnchangedWarn'))
-          applyAsset(a)
-          emit('changed')
-          finish('unchanged')
-          return
-        }
-
-        if (Date.now() - started >= AGENT_UPDATE_VERIFY_MS) {
-          execVerifyRemainSec.value = 0
-          if (online && versionChanged) {
-            setExecStatus('success', t('assets.onlineWithVer', { ver }))
-            ElMessage.success(t('assets.agentUpdated', { ver }))
-            applyAsset(a)
-            emit('changed')
-            finish('ok')
-            return
-          }
-          if (online) {
-            setExecStatus(
-              'warn',
-              t('assets.verifyTimeoutOnline', {
-                ver: ver || t('common.emDash'),
-                baseline: baseline || t('common.emDash')
-              })
-            )
-            ElMessage.warning(t('assets.verifyTimeoutWarn'))
-          } else {
-            setExecStatus(
-              'error',
-              t('assets.verifyTimeoutOffline', { baseline: baseline || t('common.emDash') })
-            )
-            ElMessage.warning(t('assets.agentOnlineTimeout'))
-          }
-          applyAsset(a)
-          emit('changed')
-          finish('timeout')
-        }
-      } catch (e) {
-        const elapsed = Math.round((Date.now() - started) / 1000)
-        const remain = Math.max(0, Math.ceil((AGENT_UPDATE_VERIFY_MS - (Date.now() - started)) / 1000))
-        execVerifyRemainSec.value = remain
-        setExecStatus('verifying', t('assets.refreshRetry', { elapsed }))
-        if (Date.now() - started >= AGENT_UPDATE_VERIFY_MS) {
-          execVerifyRemainSec.value = 0
-          appendExecLog(`[error] verify poll failed: ${e?.message || e}\n`)
-          setExecStatus('error', t('assets.refreshTimeout'))
-          finish('timeout')
-        }
-      } finally {
-        execVerifyInFlight = false
-      }
-    }
-
-    execVerifyTimer = setInterval(tick, AGENT_UPDATE_VERIFY_INTERVAL_MS)
-    tick()
-  })
 }
 
 async function oneClickUpdate() {
@@ -581,50 +416,49 @@ async function oneClickUpdate() {
   }
 
   updating.value = true
+  updateSession.aborted = false
+  updateSession.closers.clear()
   execLog.value = ''
   execVerifyRemainSec.value = 0
   setExecStatus('info', t('assets.prepareInstallCmd'))
   execDialogVisible.value = true
   execRunning.value = true
   try {
-    const { data: prep } = await api.post(`/assets/${props.assetId}/agent-update`)
-    const command = isWindows.value
-      ? (isLegacyWin.value ? (prep.cmd || prep.powershell || '') : (prep.powershell || ''))
-      : (prep.curl || '')
-    if (!command) {
-      throw new Error(t('assets.noInstallCmd'))
-    }
-    const fromVer = prep.fromAgentVersion || asset.value.agentVersion || ''
-    appendExecLog(`# from Agent ${fromVer || t('common.emDash')}\n# ${command}\n\n`)
-    setExecStatus('info', t('assets.applyExecSession'))
-
-    const { data: ticket } = await api.post('/sessions/ticket', {
-      assetId: props.assetId,
-      protocol: 'exec'
-    })
-    if (!ticket?.browserWs) {
-      throw new Error(t('assets.ticketNoBrowserWs'))
-    }
-
-    setExecStatus('info', t('assets.runningInstall'))
-    closeExecWs()
-    execHandle = openExecWs(ticket.browserWs, command, {
+    const result = await runAgentUpdate(asset.value, {
       onOutput: appendExecLog,
-      onStatus: (text) => { setExecStatus('info', text) },
-      hasLog: () => !!execLog.value.trim()
+      onStatus: (text) => { execStatusText.value = text },
+      onPhase: (phase) => {
+        if (phase === 'downloading') setExecStatus('info', execStatusText.value)
+        else if (phase === 'verifying') execStatusKind.value = 'verifying'
+        else if (phase === 'success') execStatusKind.value = 'success'
+        else if (phase === 'warn') execStatusKind.value = 'warn'
+        else if (phase === 'error') execStatusKind.value = 'error'
+        else execStatusKind.value = 'info'
+      },
+      onRemain: (sec) => { execVerifyRemainSec.value = sec },
+      onAsset: (fresh, meta) => {
+        applyAsset(fresh)
+        if (meta?.refreshList) emit('changed')
+      },
+      shouldAbort: () => updateSession.aborted || !execDialogVisible.value,
+      bindClose: (fn) => { if (typeof fn === 'function') updateSession.closers.add(fn) }
     })
-    await execHandle.done
-    closeExecWs()
-    // Install often kills the exec session on Agent restart — still verify online + version.
-    await waitAgentUpdateResult(fromVer)
-    execRunning.value = false
+    if (result.status === 'ok') {
+      ElMessage.success(t('assets.agentUpdated', { ver: result.asset?.agentVersion || '' }))
+    } else if (result.status === 'unchanged') {
+      ElMessage.warning(t('assets.versionUnchangedWarn'))
+    } else if (result.status === 'timeout') {
+      ElMessage.warning(result.asset?.online ? t('assets.verifyTimeoutWarn') : t('assets.agentOnlineTimeout'))
+    } else if (result.status === 'error') {
+      ElMessage.error(result.message || t('assets.updateFailed'))
+    }
   } catch (e) {
     const msg = e?.response?.data?.error || e?.message || t('assets.updateFailed')
-    appendExecLog(`\n[error] ${msg}\n`)
+    appendExecLog('\n[error] ' + msg + '\n')
     setExecStatus('error', t('assets.failWithMsg', { msg }))
     ElMessage.error(msg)
-    execRunning.value = false
   } finally {
+    execRunning.value = false
     updating.value = false
   }
 }
@@ -632,9 +466,7 @@ async function oneClickUpdate() {
 watch(() => props.assetId, load)
 onMounted(load)
 onBeforeUnmount(() => {
-  execVerifyGeneration += 1
-  stopAgentUpdateVerify()
-  closeExecWs()
+  abortAgentUpdate()
 })
 </script>
 

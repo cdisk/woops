@@ -1,12 +1,24 @@
 <template>
   <el-container class="layout">
-    <el-aside :width="asideWidth" class="aside">
+    <el-aside :width="asideWidth" class="aside" :class="{ 'is-collapsed': collapsed }">
       <div class="brand">
         <img class="brand-mark" src="/favicon.svg" width="22" height="22" alt="" />
-        <span class="brand-text">Woops</span>
+        <span v-show="!collapsed" class="brand-text">Woops</span>
       </div>
+      <button
+        type="button"
+        class="aside-edge"
+        :title="collapsed ? t('nav.expand') : t('nav.collapse')"
+        :aria-label="collapsed ? t('nav.expand') : t('nav.collapse')"
+        @click="toggleCollapsed"
+      >
+        <IconChevronRight v-if="collapsed" :size="14" stroke="1.75" />
+        <IconChevronLeft v-else :size="14" stroke="1.75" />
+      </button>
       <el-menu
         router
+        :collapse="collapsed"
+        :collapse-transition="false"
         :default-active="activeMenu"
         class="side-menu"
       >
@@ -50,7 +62,7 @@
           >{{ item.title }}</el-menu-item>
         </el-sub-menu>
       </el-menu>
-      <div class="aside-footer">
+      <div v-show="!collapsed" class="aside-footer">
         <div class="aside-version" :title="t('nav.version')">v{{ APP_VERSION }}</div>
         <a
           class="aside-repo"
@@ -87,6 +99,8 @@ import {
   IconAlertTriangle,
   IconBell,
   IconBellRinging,
+  IconChevronLeft,
+  IconChevronRight,
   IconClipboardList,
   IconHome,
   IconNetwork,
@@ -104,7 +118,14 @@ const role = ref(getRole())
 const user = computed(() => getDisplayName() || 'user')
 const showUsers = computed(() => canManageUsers())
 const showAlerts = computed(() => isSuperAdmin())
-const asideWidth = 'var(--ops-aside-width)'
+const NAV_COLLAPSE_KEY = 'ops.nav.collapsed'
+const collapsed = ref(localStorage.getItem(NAV_COLLAPSE_KEY) === '1')
+const asideWidth = computed(() => (collapsed.value ? '64px' : 'var(--ops-aside-width)'))
+
+function toggleCollapsed() {
+  collapsed.value = !collapsed.value
+  localStorage.setItem(NAV_COLLAPSE_KEY, collapsed.value ? '1' : '0')
+}
 const roleLabel = computed(() => {
   const key = `roles.${role.value}`
   const label = t(key)
@@ -153,10 +174,36 @@ onMounted(async () => {
 }
 
 .aside {
+  position: relative;
   background: var(--ops-bg-aside);
   border-right: 1px solid var(--ops-border);
   display: flex;
   flex-direction: column;
+  transition: width 0.2s ease;
+  overflow: visible;
+}
+
+.aside-edge {
+  position: absolute;
+  z-index: 3;
+  top: 68px;
+  right: -12px;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid var(--ops-border-strong);
+  background: var(--ops-bg-surface);
+  color: var(--ops-text-secondary);
+  box-shadow: var(--ops-shadow-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.aside-edge:hover {
+  color: var(--ops-color-primary);
+  border-color: var(--ops-color-primary);
 }
 
 .brand {
@@ -167,6 +214,11 @@ onMounted(async () => {
   padding: 0 18px;
   border-bottom: 1px solid var(--ops-border);
   flex-shrink: 0;
+}
+
+.aside.is-collapsed .brand {
+  padding: 0;
+  justify-content: center;
 }
 
 .brand-mark {
@@ -241,6 +293,16 @@ onMounted(async () => {
   color: var(--ops-text-secondary);
   flex-shrink: 0;
   vertical-align: middle;
+}
+
+.side-menu.el-menu--collapse :deep(.nav-icon) {
+  margin-right: 0;
+}
+
+.aside.is-collapsed .side-menu {
+  width: 64px;
+  padding-left: 0;
+  padding-right: 0;
 }
 
 .side-menu :deep(.el-menu-item.is-active) .nav-icon {

@@ -48,6 +48,13 @@ public class AssetEntity {
     @Column(name = "group_id")
     private UUID groupId;
 
+    /**
+     * Asset that must stay up until this one finishes an Agent update.
+     * Null means this host reaches the Gateway without another managed hop.
+     */
+    @Column(name = "update_upstream_asset_id")
+    private UUID updateUpstreamAssetId;
+
     /** RDP/VNC listen port on the agent host (Windows 3389 / Linux 5900 by default). */
     @Column(name = "desktop_port", nullable = false)
     private int desktopPort = 5900;
@@ -106,6 +113,8 @@ public class AssetEntity {
     public void setPrivateIp(String privateIp) { this.privateIp = privateIp; }
     public UUID getGroupId() { return groupId; }
     public void setGroupId(UUID groupId) { this.groupId = groupId; }
+    public UUID getUpdateUpstreamAssetId() { return updateUpstreamAssetId; }
+    public void setUpdateUpstreamAssetId(UUID updateUpstreamAssetId) { this.updateUpstreamAssetId = updateUpstreamAssetId; }
     public int getDesktopPort() { return desktopPort; }
     public void setDesktopPort(int desktopPort) { this.desktopPort = desktopPort; }
     public String getDesktopUsername() { return desktopUsername; }

@@ -16,9 +16,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
@@ -71,6 +74,10 @@ public class AssetService {
 
     public record ShellCommandsRequest(List<String> items) {}
 
+    public record UpdateUpstreamRequest(List<UUID> assetIds, UUID upstreamAssetId, Boolean clear) {}
+
+    public record UpdatePlanRequest(List<UUID> assetIds) {}
+
     @Transactional(readOnly = true)
     public List<Map<String, Object>> list(UserEntity user, UUID groupId, boolean rootOnly, boolean includeSubtree) {
         if (rootOnly) {
@@ -100,7 +107,8 @@ public class AssetService {
         }
         list = list.stream().sorted(ASSET_BY_NAME).toList();
         Map<UUID, String> names = groups.nameById();
-        return list.stream().map(a -> toView(user, a, names)).toList();
+        Map<UUID, AssetEntity> upstreams = indexUpstreams(list);
+        return list.stream().map(a -> toView(user, a, names, upstreams)).toList();
     }
 
     @Transactional(readOnly = true)
@@ -197,8 +205,142 @@ public class AssetService {
         alertStatus.deleteById(asset.getId());
         alertPendings.deleteByAssetId(asset.getId());
         alertIncidents.deleteByAssetId(asset.getId());
+        assets.clearUpdateUpstream(asset.getId());
         assets.delete(asset);
         return Map.of("status", "deleted", "id", id.toString());
+    }
+
+    @Transactional
+    public Map<String, Object> setUpdateUpstream(UserEntity user, UpdateUpstreamRequest req) {
+        if (req == null || req.assetIds() == null || req.assetIds().isEmpty()) {
+            throw new IllegalArgumentException("assetIds required");
+        }
+        boolean clear = Boolean.TRUE.equals(req.clear());
+        UUID upstreamId = clear ? null : req.upstreamAssetId();
+        if (!clear && upstreamId == null) {
+            throw new IllegalArgumentException("upstreamAssetId required");
+        }
+        List<AssetEntity> all = assets.findAll();
+        Map<UUID, AssetEntity> byId = new HashMap<>();
+        Map<UUID, UUID> graph = new HashMap<>();
+        for (AssetEntity a : all) {
+            byId.put(a.getId(), a);
+            if (a.getUpdateUpstreamAssetId() != null) {
+                graph.put(a.getId(), a.getUpdateUpstreamAssetId());
+            }
+        }
+        List<UUID> ids = req.assetIds().stream().filter(Objects::nonNull).distinct().toList();
+        if (ids.isEmpty()) {
+            throw new IllegalArgumentException("assetIds required");
+        }
+        for (UUID id : ids) {
+            AssetEntity asset = byId.get(id);
+            if (asset == null) {
+                throw new IllegalArgumentException("asset not found");
+            }
+            access.assertCanAccessAsset(user, asset);
+        }
+        if (upstreamId != null) {
+            AssetEntity upstream = byId.get(upstreamId);
+            if (upstream == null) {
+                throw new IllegalArgumentException("upstream asset not found");
+            }
+            access.assertCanAccessAsset(user, upstream);
+        }
+        UpdateTopology.withUpstream(graph, ids, upstreamId);
+        String upstreamText = upstreamId == null ? "" : upstreamId.toString();
+        for (UUID id : ids) {
+            AssetEntity asset = byId.get(id);
+            asset.setUpdateUpstreamAssetId(upstreamId);
+            asset.setUpdatedAt(java.time.Instant.now());
+            assets.save(asset);
+            audit.record(
+                    ControlAuditService.CAT_ASSET,
+                    ControlAuditService.ACT_UPDATE,
+                    user.getId(),
+                    user.getUsername(),
+                    asset.getId(),
+                    asset.getGroupId(),
+                    null,
+                    ControlAuditService.jsonDetail(Map.of(
+                            "updateUpstreamAssetId", upstreamText,
+                            "cleared", upstreamId == null)));
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("updated", ids.size());
+        out.put("updateUpstreamAssetId", upstreamText);
+        return out;
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, Object> updatePlan(UserEntity user, List<UUID> assetIds) {
+        LoadedGraph loaded = loadGraph();
+        List<UUID> ids = assetIds == null ? List.of() : assetIds.stream().filter(Objects::nonNull).distinct().toList();
+        for (UUID id : ids) {
+            AssetEntity asset = loaded.byId().get(id);
+            if (asset == null) {
+                throw new IllegalArgumentException("asset not found");
+            }
+            access.assertCanAccessAsset(user, asset);
+        }
+        List<UpdateTopology.PlanLayer> layers = UpdateTopology.plan(ids, loaded.upstreamOf());
+        List<Map<String, Object>> outLayers = new ArrayList<>();
+        for (UpdateTopology.PlanLayer layer : layers) {
+            List<Map<String, Object>> assetsOut = new ArrayList<>();
+            for (UpdateTopology.PlanNode node : layer.assets()) {
+                assetsOut.add(planAsset(loaded.byId().get(node.id()), node.blockIds()));
+            }
+            outLayers.add(Map.of("assets", assetsOut));
+        }
+        return Map.of("layers", outLayers);
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, Object> updateTopology(UserEntity user, List<UUID> focusIds) {
+        LoadedGraph loaded = loadGraph();
+        Map<UUID, String> groupNames = groups.nameById();
+        Set<UUID> visible = new HashSet<>();
+        for (AssetEntity asset : loaded.byId().values()) {
+            if (access.canAccessAsset(user, asset)) {
+                visible.add(asset.getId());
+            }
+        }
+        Set<UUID> shown = UpdateTopology.focus(visible, loaded.upstreamOf(), focusIds);
+        UpdateTopology.TopoSketch sketch = UpdateTopology.sketch(shown, visible, loaded.upstreamOf());
+        Set<UUID> selected = new HashSet<>();
+        if (focusIds != null) {
+            for (UUID id : focusIds) {
+                if (id != null && shown.contains(id)) {
+                    selected.add(id);
+                }
+            }
+        }
+        List<Map<String, Object>> nodes = new ArrayList<>();
+        if (sketch.gateway()) {
+            nodes.add(topoGateway());
+        }
+        List<AssetEntity> shownAssets = new ArrayList<>();
+        for (UUID id : shown) {
+            AssetEntity asset = loaded.byId().get(id);
+            if (asset != null) {
+                shownAssets.add(asset);
+            }
+        }
+        shownAssets.sort(ASSET_BY_NAME);
+        for (AssetEntity asset : shownAssets) {
+            nodes.add(topoAsset(asset, selected.contains(asset.getId()), groupNames));
+        }
+        for (String hiddenId : sketch.hiddenIds()) {
+            nodes.add(topoHidden(hiddenId));
+        }
+        List<Map<String, String>> edges = new ArrayList<>();
+        for (UpdateTopology.TopoEdge edge : sketch.edges()) {
+            edges.add(Map.of("from", edge.from(), "to", edge.to()));
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("nodes", nodes);
+        out.put("edges", edges);
+        return out;
     }
 
     @Transactional(readOnly = true)
@@ -260,7 +402,102 @@ public class AssetService {
         return List.copyOf(out);
     }
 
+    private LoadedGraph loadGraph() {
+        List<AssetEntity> all = assets.findAll();
+        Map<UUID, AssetEntity> byId = new HashMap<>();
+        Map<UUID, UUID> upstreamOf = new HashMap<>();
+        for (AssetEntity asset : all) {
+            byId.put(asset.getId(), asset);
+            if (asset.getUpdateUpstreamAssetId() != null) {
+                upstreamOf.put(asset.getId(), asset.getUpdateUpstreamAssetId());
+            }
+        }
+        return new LoadedGraph(byId, upstreamOf);
+    }
+
+    private Map<UUID, AssetEntity> indexUpstreams(List<AssetEntity> list) {
+        Set<UUID> ids = new HashSet<>();
+        for (AssetEntity asset : list) {
+            if (asset.getUpdateUpstreamAssetId() != null) {
+                ids.add(asset.getUpdateUpstreamAssetId());
+            }
+        }
+        Map<UUID, AssetEntity> out = new HashMap<>();
+        if (!ids.isEmpty()) {
+            for (AssetEntity asset : assets.findAllById(ids)) {
+                out.put(asset.getId(), asset);
+            }
+        }
+        return out;
+    }
+
+    private Map<String, Object> planAsset(AssetEntity asset, List<UUID> blockIds) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("id", asset.getId().toString());
+        m.put("displayName", asset.getDisplayName() == null ? "" : asset.getDisplayName());
+        m.put("hostname", asset.getHostname() == null ? "" : asset.getHostname());
+        m.put("os", asset.getOs() == null ? "" : asset.getOs());
+        m.put("privateIp", UpdateTopology.primaryPrivateIp(asset.getPrivateIp()));
+        m.put("online", asset.isOnline());
+        m.put("groupId", asset.getGroupId() == null ? null : asset.getGroupId().toString());
+        m.put("agentVersion", asset.getAgentVersion() == null ? "" : asset.getAgentVersion());
+        m.put("blockIds", blockIds.stream().map(UUID::toString).toList());
+        return m;
+    }
+
+    private static Map<String, Object> topoGateway() {
+        Map<String, Object> n = new LinkedHashMap<>();
+        n.put("id", UpdateTopology.GATEWAY_ID);
+        n.put("kind", "gateway");
+        n.put("name", "Gateway");
+        n.put("privateIp", "");
+        n.put("online", true);
+        n.put("agentVersion", "");
+        n.put("hidden", false);
+        n.put("selected", false);
+        return n;
+    }
+
+    private static Map<String, Object> topoHidden(String id) {
+        Map<String, Object> n = new LinkedHashMap<>();
+        n.put("id", id);
+        n.put("kind", "hidden");
+        n.put("name", "");
+        n.put("privateIp", "");
+        n.put("online", false);
+        n.put("agentVersion", "");
+        n.put("hidden", true);
+        n.put("selected", false);
+        return n;
+    }
+
+    private static Map<String, Object> topoAsset(
+            AssetEntity asset,
+            boolean selected,
+            Map<UUID, String> groupNames) {
+        Map<String, Object> n = new LinkedHashMap<>();
+        n.put("id", asset.getId().toString());
+        n.put("kind", "asset");
+        n.put("name", asset.getDisplayName() == null ? "" : asset.getDisplayName());
+        n.put("privateIp", UpdateTopology.primaryPrivateIp(asset.getPrivateIp()));
+        n.put("online", asset.isOnline());
+        n.put("agentVersion", asset.getAgentVersion() == null ? "" : asset.getAgentVersion());
+        n.put("groupId", asset.getGroupId() == null ? null : asset.getGroupId().toString());
+        n.put("groupName", asset.getGroupId() == null
+                ? ""
+                : groupNames.getOrDefault(asset.getGroupId(), ""));
+        n.put("hidden", false);
+        n.put("selected", selected);
+        return n;
+    }
+
+    private record LoadedGraph(Map<UUID, AssetEntity> byId, Map<UUID, UUID> upstreamOf) {}
+
     private Map<String, Object> toView(UserEntity user, AssetEntity a, Map<UUID, String> names) {
+        return toView(user, a, names, null);
+    }
+
+    private Map<String, Object> toView(UserEntity user, AssetEntity a, Map<UUID, String> names, Map<UUID, AssetEntity> upstreamById) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", a.getId().toString());
         m.put("displayName", a.getDisplayName());
@@ -284,7 +521,27 @@ public class AssetService {
         m.put("lastSeenAt", a.getLastSeenAt() == null ? "" : a.getLastSeenAt().toString());
         m.put("createdAt", a.getCreatedAt().toString());
         m.put("canDelete", access.canDeleteAsset(user, a));
+        putUpstream(user, a, m, upstreamById);
         return m;
+    }
+
+    private void putUpstream(UserEntity user, AssetEntity a, Map<String, Object> m, Map<UUID, AssetEntity> upstreamById) {
+        m.put("updateUpstreamAssetId", null);
+        m.put("updateUpstreamName", "");
+        m.put("updateUpstreamHidden", false);
+        UUID upstreamId = a.getUpdateUpstreamAssetId();
+        if (upstreamId == null) {
+            return;
+        }
+        AssetEntity upstream = upstreamById != null
+                ? upstreamById.get(upstreamId)
+                : assets.findById(upstreamId).orElse(null);
+        if (upstream != null && access.canAccessAsset(user, upstream)) {
+            m.put("updateUpstreamAssetId", upstreamId.toString());
+            m.put("updateUpstreamName", upstream.getDisplayName() == null ? "" : upstream.getDisplayName());
+            return;
+        }
+        m.put("updateUpstreamHidden", true);
     }
 
     /** Guacamole RDP color-depth: 8, 16, 24, or 32 (no 15-bit). */

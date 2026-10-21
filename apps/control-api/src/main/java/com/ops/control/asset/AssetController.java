@@ -40,6 +40,44 @@ public class AssetController {
         return assetService.list(user, groupId, rootOnly, includeSubtree);
     }
 
+    @PutMapping("/update-upstream")
+    public Map<String, Object> setUpdateUpstream(
+            @RequestBody AssetService.UpdateUpstreamRequest req,
+            Authentication auth) {
+        UserEntity user = access.requireUser(auth);
+        return assetService.setUpdateUpstream(user, req);
+    }
+
+    @PostMapping("/update-plan")
+    public Map<String, Object> updatePlan(
+            @RequestBody AssetService.UpdatePlanRequest req,
+            Authentication auth) {
+        UserEntity user = access.requireUser(auth);
+        return assetService.updatePlan(user, req == null ? List.of() : req.assetIds());
+    }
+
+    @GetMapping("/update-topology")
+    public Map<String, Object> updateTopology(
+            @RequestParam(required = false) String focus,
+            Authentication auth) {
+        UserEntity user = access.requireUser(auth);
+        return assetService.updateTopology(user, parseFocus(focus));
+    }
+
+    private static List<UUID> parseFocus(String focus) {
+        if (focus == null || focus.isBlank()) {
+            return List.of();
+        }
+        List<UUID> ids = new java.util.ArrayList<>();
+        for (String part : focus.split(",")) {
+            String token = part.trim();
+            if (!token.isEmpty()) {
+                ids.add(UUID.fromString(token));
+            }
+        }
+        return ids;
+    }
+
     @GetMapping("/{id}")
     public Map<String, Object> get(@PathVariable UUID id, Authentication auth) {
         UserEntity user = access.requireUser(auth);

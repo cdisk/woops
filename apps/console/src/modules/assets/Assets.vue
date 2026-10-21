@@ -12,6 +12,18 @@
           <IconRefresh :size="16" stroke="1.75" />
           {{ t('common.refresh') }}
         </el-button>
+        <el-dropdown trigger="click" @command="onOpsCommand">
+          <el-button>
+            {{ t('assets.operations') }}
+            <IconChevronDown :size="16" stroke="1.75" />
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="upstream" :disabled="!selectedRows.length">{{ t('assets.setUpstream') }}</el-dropdown-item>
+              <el-dropdown-item command="update" :disabled="!selectedRows.length">{{ t('assets.oneClickUpdate') }}</el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <el-button v-if="canManageInventory()" type="primary" :loading="installLoading" @click="openInstall">
           <IconLink :size="16" stroke="1.75" />
           {{ t('assets.generateInstall') }}
@@ -34,7 +46,16 @@
             <span class="list-count">{{ t('assets.count', { n: filteredAssets.length }) }}</span>
           </div>
         </div>
-        <el-table :data="filteredAssets" v-loading="loading" stripe height="100%">
+        <el-table
+          ref="tableRef"
+          :data="filteredAssets"
+          v-loading="loading"
+          stripe
+          height="100%"
+          row-key="id"
+          @selection-change="onSelectionChange"
+        >
+          <el-table-column type="selection" width="42" fixed="left" reserve-selection />
           <el-table-column :label="t('common.name')" min-width="140" show-overflow-tooltip sortable :sort-method="sortByName">
             <template #default="{ row }">
               <div class="stack-cell">
@@ -222,6 +243,9 @@ set "https_proxy=http://proxyuser:changeme@10.0.0.1:3128"
         </div>
       </div>
     </el-dialog>
+
+    <UpdateUpstreamDialog v-model="upstreamVisible" :assets="selectedRows" @saved="loadAssets" />
+    <BatchUpdateDialog v-model="batchVisible" :assets="selectedRows" @done="loadAssets" />
   </div>
 </template>
 
@@ -244,6 +268,8 @@ import { assetSessionActions } from '../../features/registry'
 import { isWindows } from '../../session/assetOs'
 import GroupTree, { ALL_KEY } from './GroupTree.vue'
 import AssetDetail from './AssetDetail.vue'
+import UpdateUpstreamDialog from './UpdateUpstreamDialog.vue'
+import BatchUpdateDialog from './BatchUpdateDialog.vue'
 
 const { t, locale } = useI18n()
 const route = useRoute()
@@ -256,6 +282,10 @@ const selectedKey = ref(ALL_KEY)
 const selectedGroupName = ref('')
 const showSubtree = ref(false)
 const groupTreeRef = ref(null)
+const tableRef = ref(null)
+const selectedRows = ref([])
+const upstreamVisible = ref(false)
+const batchVisible = ref(false)
 
 const detailVisible = ref(false)
 const detailAssetId = ref('')
@@ -382,8 +412,24 @@ function syncSelectedGroupName() {
 
 function onGroupChange() {
   if (applyingRouteQuery) return
+  tableRef.value?.clearSelection()
+  selectedRows.value = []
   syncSelectedGroupName()
   loadAssets()
+}
+
+function onSelectionChange(rows) {
+  selectedRows.value = rows || []
+}
+
+function onOpsCommand(command) {
+  if (command === 'upstream') {
+    if (!selectedRows.value.length) return
+    upstreamVisible.value = true
+  } else if (command === 'update') {
+    if (!selectedRows.value.length) return
+    batchVisible.value = true
+  }
 }
 
 function sessionActionsFor(row) {
@@ -554,8 +600,13 @@ async function copyText(text) {
 
 watch(
   () => [route.query.q, route.query.groupId, route.query.includeSubtree],
-  async () => {
+  async (next, prev) => {
+    const groupChanged = !prev || next[1] !== prev[1] || next[2] !== prev[2]
     applyRouteQuery()
+    if (groupChanged) {
+      tableRef.value?.clearSelection()
+      selectedRows.value = []
+    }
     syncSelectedGroupName()
     await loadAssets()
   }
@@ -579,6 +630,7 @@ onBeforeUnmount(() => {
   gap: 12px;
   margin-bottom: 12px;
   flex-shrink: 0;
+  flex-wrap: wrap;
 }
 .toolbar-search { flex: 1; max-width: 360px; min-width: 180px; }
 .toolbar-actions { display: flex; gap: 8px; flex-shrink: 0; margin-left: auto; }
