@@ -80,7 +80,11 @@ func (s *Server) handleAgentControl(w http.ResponseWriter, r *http.Request) {
 		_ = ws.Close()
 	}()
 
-	hello, _ := control.Marshal("hello_ack", "", control.AckPayload{OK: true})
+	pingEvery := s.PingFor("control")
+	hello, _ := control.Marshal("hello_ack", "", control.AckPayload{
+		OK:          true,
+		PingSeconds: int(pingEvery / time.Second),
+	})
 	_ = conn.Send(hello)
 
 	s.extensionsMu.RLock()
@@ -94,7 +98,7 @@ func (s *Server) handleAgentControl(w http.ResponseWriter, r *http.Request) {
 
 	done := make(chan struct{})
 	defer close(done)
-	wsutil.StartPingLoop(ws, done, 90*time.Second, 25*time.Second, &conn.mu)
+	wsutil.StartPingLoop(ws, done, wsutil.IdleForPing(pingEvery), pingEvery, &conn.mu)
 
 	for {
 		_, data, err := ws.ReadMessage()
@@ -115,11 +119,14 @@ func (s *Server) handleAgentControl(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				continue
 			}
-			_ = s.postJSON("/api/internal/agent/netinfo", map[string]any{
-				"assetId":    assetID,
-				"agentToken": token,
-				"privateIp":  payload.PrivateIP,
-			}, nil)
+			privateIP := payload.PrivateIP
+			go func() {
+				_ = s.postJSON("/api/internal/agent/netinfo", map[string]any{
+					"assetId":    assetID,
+					"agentToken": token,
+					"privateIp":  privateIP,
+				}, nil)
+			}()
 		default:
 			s.extensionsMu.RLock()
 			handler := s.controlHandlers[env.Type]
@@ -134,7 +141,7 @@ func (s *Server) handleAgentControl(w http.ResponseWriter, r *http.Request) {
 				}
 				return conn.Send(msg)
 			}
-			if err := handler(ControlContext{AssetID: assetID, Send: send}, env); err != nil {
+			if err := handler(ControlContext{AssetID: assetID, AgentToken: token, Send: send}, env); err != nil {
 				log.Printf("agent control handler type=%s asset=%s: %v", env.Type, assetID, err)
 			}
 		}

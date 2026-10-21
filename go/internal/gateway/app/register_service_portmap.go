@@ -1,6 +1,8 @@
 package app
 
 import (
+	"time"
+
 	"github.com/ops-bastion/ops/go/internal/gateway/core"
 	"github.com/ops-bastion/ops/go/internal/gateway/services/portmap"
 	"github.com/ops-bastion/ops/go/internal/protocol/control"
@@ -23,6 +25,8 @@ func init() {
 				return s.OpenAgentSession(assetID, sessionID, ticket, protocol,
 					control.TunnelParams{TargetHost: host, TargetPort: port})
 			},
+			Cancel:           s.CancelSession,
+			KeepAlive:        func() time.Duration { return s.PingFor("portmap") },
 			AuditStart:       s.OperationStart,
 			AuditEnd:         s.OperationEnd,
 			AuditStartClaims: s.AuditStart,

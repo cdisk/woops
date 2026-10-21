@@ -15,6 +15,7 @@ import (
 	auditstore "github.com/ops-bastion/ops/go/internal/gateway/infra/audit"
 	"github.com/ops-bastion/ops/go/internal/protocol/control"
 	"github.com/ops-bastion/ops/go/internal/protocol/datagram"
+	"github.com/ops-bastion/ops/go/internal/sessioncore"
 	"github.com/ops-bastion/ops/go/internal/sessionws"
 )
 
@@ -156,7 +157,7 @@ func (s *Service) HandleAgentOpen(w http.ResponseWriter, r *http.Request) {
 
 func (s *Service) serveReverseSession(e *entry, sessionID, protocol, targetHost string,
 	targetPort int, clientAddr string) {
-	ws, err := s.deps.Wait(sessionID, 20*time.Second)
+	ws, err := s.deps.Wait(sessionID, sessioncore.AgentDialWait)
 	if err != nil {
 		log.Printf("portmap reverse wait failed mapping=%s session=%s: %v", e.runtime.MappingID, sessionID, err)
 		opType := auditstore.TypePortmapTCP

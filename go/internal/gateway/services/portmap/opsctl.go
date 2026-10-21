@@ -199,7 +199,7 @@ func (s *Service) HandleOpsctlReverseControl(w http.ResponseWriter, r *http.Requ
 	}
 	keepDone := make(chan struct{})
 	defer close(keepDone)
-	sessioncore.StartKeepAlive(ws, keepDone)
+	sessioncore.StartKeepAliveEvery(ws, keepDone, s.keepAlive())
 	entry := &ephemeralEntry{
 		claims: claims, ws: ws,
 		pending:  make(map[string]chan reverseOpenResponse),
@@ -495,7 +495,7 @@ func (s *Service) serveEphemeralReverse(session *ephemeralSession) {
 			entry.close()
 		}
 	}()
-	agentWS, waitErr := s.deps.Wait(session.base.SessionID, 20*time.Second)
+	agentWS, waitErr := s.deps.Wait(session.base.SessionID, sessioncore.AgentDialWait)
 	if waitErr != nil {
 		select {
 		case ctlWS := <-session.ctlWS:
@@ -523,8 +523,9 @@ func (s *Service) serveEphemeralReverse(session *ephemeralSession) {
 	}
 	keepDone := make(chan struct{})
 	defer close(keepDone)
-	sessioncore.StartKeepAlive(agentWS, keepDone)
-	sessioncore.StartKeepAlive(ctlWS, keepDone)
+	pingEvery := s.keepAlive()
+	sessioncore.StartKeepAliveEvery(agentWS, keepDone, pingEvery)
+	sessioncore.StartKeepAliveEvery(ctlWS, keepDone, pingEvery)
 
 	var bytesIn, bytesOut int64
 	if session.base.Type == "udp" {

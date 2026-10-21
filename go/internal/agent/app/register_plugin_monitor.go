@@ -1,23 +1,20 @@
 package app
 
 import (
-	"context"
-
+	"github.com/ops-bastion/ops/go/internal/agent/core"
 	"github.com/ops-bastion/ops/go/internal/agent/plugins/monitor"
+	"github.com/ops-bastion/ops/go/internal/agent/sessionreg"
 )
 
 func init() {
 	registerFeature("plugin.monitor", func(ctx *buildContext) {
-		ctx.registerBackground(func(runCtx context.Context) {
-			monitor.Start(runCtx, monitor.Config{
-				MetricsWS:  ctx.cfg.MetricsWS,
-				AssetID:    ctx.cfg.AssetID,
-				AgentToken: ctx.cfg.AgentToken,
-				Interval:   ctx.cfg.MetricsInterval,
-				Enabled:    ctx.cfg.MetricsEnabled,
-				ConfigPath: ctx.cfg.ConfigPath,
-				Dialer:     ctx.services.Dialer,
-			})
+		if !ctx.cfg.MetricsEnabled {
+			return
+		}
+		reporter := monitor.NewReporter(ctx.cfg.MetricsInterval)
+		ctx.registerControl(func(send core.ControlSender, _ *sessionreg.ControlRegistry) {
+			reporter.OnConnect(monitor.Sender(send))
 		})
+		ctx.registerDisconnect(reporter.OnDisconnect)
 	})
 }

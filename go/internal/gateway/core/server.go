@@ -15,6 +15,7 @@ import (
 	auditstore "github.com/ops-bastion/ops/go/internal/gateway/infra/audit"
 	"github.com/ops-bastion/ops/go/internal/protocol/control"
 	"github.com/ops-bastion/ops/go/internal/sessioncore"
+	"github.com/ops-bastion/ops/go/internal/wsutil"
 )
 
 var _ Router = (*Server)(nil)
@@ -41,6 +42,8 @@ type Config struct {
 	AuditDir string
 	// AuditInstanceID names this Gateway in segment filenames. Empty derives one.
 	AuditInstanceID string
+	// Ping is the WebSocket ping schedule. Zero uses the 25s default.
+	Ping wsutil.PingConfig
 }
 
 type Server struct {
@@ -67,8 +70,9 @@ type Server struct {
 }
 
 type ControlContext struct {
-	AssetID string
-	Send    func(typ, requestID string, payload any) error
+	AssetID    string
+	AgentToken string
+	Send       func(typ, requestID string, payload any) error
 }
 
 type ControlHandler func(ControlContext, control.Envelope) error
@@ -260,6 +264,22 @@ func (s *Server) SendAgent(assetID string, msg []byte) error {
 
 func (s *Server) ArmSession(sessionID string) { s.pending.Arm(sessionID) }
 
+func (s *Server) CancelSession(sessionID string) { s.pending.Cancel(sessionID) }
+
+// PingFor returns the ping interval for a channel or session protocol.
+// filemanager/filetransfer share file, rdp/vnc share desktop, tcp/udp share portmap.
+func (s *Server) PingFor(kind string) time.Duration {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "filemanager", "filetransfer":
+		kind = "file"
+	case "rdp", "vnc":
+		kind = "desktop"
+	case "tcp", "udp":
+		kind = "portmap"
+	}
+	return s.cfg.Ping.For(kind)
+}
+
 func (s *Server) WaitSession(sessionID string, timeout time.Duration) (*websocket.Conn, error) {
 	return s.pending.Wait(sessionID, timeout)
 }
@@ -401,7 +421,13 @@ type AgentConn struct {
 func (a *AgentConn) Send(msg []byte) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.WS.WriteMessage(websocket.TextMessage, msg)
+	if a.WS == nil {
+		return fmt.Errorf("agent websocket closed")
+	}
+	_ = a.WS.SetWriteDeadline(time.Now().Add(10 * time.Second))
+	err := a.WS.WriteMessage(websocket.TextMessage, msg)
+	_ = a.WS.SetWriteDeadline(time.Time{})
+	return err
 }
 
 type AgentRegistry struct {

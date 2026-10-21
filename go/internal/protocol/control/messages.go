@@ -74,8 +74,9 @@ type PortmapListenStatusPayload struct {
 }
 
 type AckPayload struct {
-	OK      bool   `json:"ok"`
-	Message string `json:"message,omitempty"`
+	OK          bool   `json:"ok"`
+	Message     string `json:"message,omitempty"`
+	PingSeconds int    `json:"pingSeconds,omitempty"`
 }
 
 type NetInfoPayload struct {

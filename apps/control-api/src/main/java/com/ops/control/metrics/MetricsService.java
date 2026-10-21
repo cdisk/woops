@@ -976,15 +976,23 @@ public class MetricsService {
     }
 
     @Transactional
-    public int purgeHistoryOlderThanRetention() {
+    public RetentionPurge.Result purgeHistoryOlderThanRetention() {
         Instant before = Instant.now().minus(monitor.detailRetentionDays(), ChronoUnit.DAYS);
-        return dataRepo.deleteOlderThan(before);
+        return purgeTable("monitor_history", before, () -> dataRepo.deleteOlderThan(before));
     }
 
     @Transactional
-    public int purgeTrendsOlderThanRetention() {
+    public RetentionPurge.Result purgeTrendsOlderThanRetention() {
         Instant before = Instant.now().minus(monitor.trendsRetentionDays(), ChronoUnit.DAYS);
-        return trendsRepo.deleteOlderThan(before);
+        return purgeTable("monitor_trends", before, () -> trendsRepo.deleteOlderThan(before));
+    }
+
+    private RetentionPurge.Result purgeTable(String table, Instant before, java.util.function.IntSupplier rows) {
+        int chunks = RetentionPurge.dropChunks(jdbc, table, before);
+        if (chunks >= 0) {
+            return RetentionPurge.decide(true, chunks, 0);
+        }
+        return RetentionPurge.decide(false, 0, rows.getAsInt());
     }
 
     /**

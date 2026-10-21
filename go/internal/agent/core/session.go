@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -9,9 +10,15 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/ops-bastion/ops/go/internal/protocol/control"
+)
+
+const (
+	sessionDialBudget         = 18 * time.Second
+	sessionDialRetryMinRemain = 5 * time.Second
 )
 
 func (r *Runtime) handleOpenSession(raw control.OpenSessionPayload) {
@@ -55,8 +62,38 @@ func (r *Runtime) dialSessionWS(sessionID, ticket string) (*websocket.Conn, erro
 	header := http.Header{}
 	header.Set("X-Asset-Id", r.cfg.AssetID)
 	header.Set("X-Agent-Token", r.cfg.AgentToken)
-	ws, _, err := r.dialer.Dial(u.String(), header)
-	return ws, err
+	ctx, cancel := context.WithTimeout(context.Background(), sessionDialBudget)
+	defer cancel()
+	return dialWithRetry(ctx, func(ctx context.Context) (*websocket.Conn, error) {
+		ws, _, err := r.dialer.DialContext(ctx, u.String(), header)
+		return ws, err
+	})
+}
+
+// dialWithRetry attempts dial once, then once more when the failure was fast
+// and more than sessionDialRetryMinRemain is left in ctx.
+func dialWithRetry(ctx context.Context, dial func(context.Context) (*websocket.Conn, error)) (*websocket.Conn, error) {
+	var last error
+	for attempt := 0; attempt < 2; attempt++ {
+		if attempt == 1 {
+			deadline, ok := ctx.Deadline()
+			if !ok || time.Until(deadline) <= sessionDialRetryMinRemain {
+				break
+			}
+		}
+		ws, err := dial(ctx)
+		if err == nil {
+			return ws, nil
+		}
+		last = err
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	if last == nil {
+		last = ctx.Err()
+	}
+	return nil, last
 }
 
 func (r *Runtime) postJSON(path string, body, out any) error {

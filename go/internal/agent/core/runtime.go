@@ -163,15 +163,26 @@ func (r *Runtime) runOnce(ctx context.Context) (connected bool, err error) {
 		_ = ws.Close()
 	}()
 
-	// Keepalive: Gateway pings every 25s. Refresh deadline on Ping (inbound) and
-	// Pong (if we ever ping). Without PingHandler, Agent hit i/o timeout at ~90s.
-	wsutil.EnableReadDeadline(ws, wsutil.DefaultIdle)
+	// Keepalive: Gateway pings on its configured interval (hello_ack.pingSeconds,
+	// default 25s). Refresh the read deadline on Ping. Idle is 3×ping, 15..90s.
+	idle := wsutil.DefaultIdle
+	applyIdle := func(next time.Duration) {
+		if next <= 0 {
+			return
+		}
+		idle = next
+		wsutil.EnableReadDeadline(ws, idle)
+	}
+	applyIdle(idle)
 
 	var writeMu sync.Mutex
 	send := func(msg []byte) error {
 		writeMu.Lock()
 		defer writeMu.Unlock()
-		return ws.WriteMessage(websocket.TextMessage, msg)
+		_ = ws.SetWriteDeadline(time.Now().Add(10 * time.Second))
+		err := ws.WriteMessage(websocket.TextMessage, msg)
+		_ = ws.SetWriteDeadline(time.Time{})
+		return err
 	}
 	sendNetInfo := func() {
 		info := CollectNetInfo()
@@ -235,13 +246,19 @@ func (r *Runtime) runOnce(ctx context.Context) (connected bool, err error) {
 			}
 			return connected, err
 		}
-		_ = ws.SetReadDeadline(time.Now().Add(wsutil.DefaultIdle))
+		_ = ws.SetReadDeadline(time.Now().Add(idle))
 		var env control.Envelope
 		if err := json.Unmarshal(data, &env); err != nil {
 			continue
 		}
 		switch env.Type {
-		case "hello_ack", "pong":
+		case "hello_ack":
+			ack, err := control.UnmarshalPayload[control.AckPayload](env)
+			if err == nil && ack.PingSeconds > 0 {
+				applyIdle(wsutil.IdleForPing(time.Duration(ack.PingSeconds) * time.Second))
+			}
+			continue
+		case "pong":
 			continue
 		}
 		if _, err := ctrl.Handle(env); err != nil {

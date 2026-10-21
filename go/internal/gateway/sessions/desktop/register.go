@@ -13,13 +13,13 @@ import (
 
 type Claims struct {
 	sessioncore.BaseClaims
-	TargetHost         string `json:"targetHost"`
-	TargetPort         int    `json:"targetPort"`
-	DesktopUsername    string `json:"desktopUsername"`
-	DesktopPassword    string `json:"desktopPassword"`
-	Hostname           string `json:"hostname"`
-	DesktopColorDepth  int    `json:"desktopColorDepth,omitempty"`
-	DesktopRdpQuality  string `json:"desktopRdpQuality,omitempty"`
+	TargetHost        string `json:"targetHost"`
+	TargetPort        int    `json:"targetPort"`
+	DesktopUsername   string `json:"desktopUsername"`
+	DesktopPassword   string `json:"desktopPassword"`
+	Hostname          string `json:"hostname"`
+	DesktopColorDepth int    `json:"desktopColorDepth,omitempty"`
+	DesktopRdpQuality string `json:"desktopRdpQuality,omitempty"`
 }
 
 type Params = control.TunnelParams
@@ -30,6 +30,8 @@ type Deps struct {
 	Arm              func(string)
 	Wait             func(string, time.Duration) (*websocket.Conn, error)
 	OpenAgentSession func(string, string, string, string, any) error
+	Cancel           func(string)
+	KeepAlive        func() time.Duration
 	AuditStart       func(string, sessioncore.BaseClaims, map[string]any)
 	AuditEnd         func(string, sessioncore.BaseClaims, bool, map[string]any)
 	AttachFinalize   func(string, func() map[string]any)

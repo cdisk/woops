@@ -17,13 +17,34 @@ public class MetricsRetentionJob {
     /** Daily purge of history beyond detail retention and trends beyond trends retention. */
     @Scheduled(cron = "0 30 3 * * *")
     public void purge() {
-        int history = metrics.purgeHistoryOlderThanRetention();
-        if (history > 0) {
-            log.info("purged {} monitor_history rows beyond detail retention", history);
+        RetentionPurge.runBoth(this::purgeHistory, this::purgeTrends, ex ->
+                log.warn("retention purge failed", ex));
+    }
+
+    private void purgeHistory() {
+        purgeOne("monitor_history", metrics::purgeHistoryOlderThanRetention);
+    }
+
+    private void purgeTrends() {
+        purgeOne("monitor_trends", metrics::purgeTrendsOlderThanRetention);
+    }
+
+    private void purgeOne(String table, java.util.function.Supplier<RetentionPurge.Result> purge) {
+        try {
+            logOutcome(table, purge.get());
+        } catch (RuntimeException ex) {
+            throw new IllegalStateException(table, ex);
         }
-        int trends = metrics.purgeTrendsOlderThanRetention();
-        if (trends > 0) {
-            log.info("purged {} monitor_trends rows beyond trends retention", trends);
+    }
+
+    private void logOutcome(String table, RetentionPurge.Result result) {
+        if (result == null || result.removed() <= 0) {
+            return;
+        }
+        if (result.kind() == RetentionPurge.Kind.CHUNKS) {
+            log.info("dropped {} {} chunks beyond retention", result.removed(), table);
+        } else {
+            log.info("purged {} {} rows beyond retention", result.removed(), table);
         }
     }
 }

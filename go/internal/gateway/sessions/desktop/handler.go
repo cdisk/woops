@@ -112,8 +112,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	keepDone := make(chan struct{})
 	defer close(keepDone)
-	sessioncore.StartKeepAlive(browserWS, keepDone)
-	sessioncore.StartKeepAlive(agentWS, keepDone)
+	pingEvery := h.keepAlive()
+	sessioncore.StartKeepAliveEvery(browserWS, keepDone, pingEvery)
+	sessioncore.StartKeepAliveEvery(agentWS, keepDone, pingEvery)
 	errCh := make(chan error, 2)
 	go func() { errCh <- relayGuacdToBrowser(writer, guacConn) }()
 	go func() { errCh <- relayBrowserToGuacd(browserWS, writer, guacConn) }()
@@ -135,11 +136,14 @@ func (h *Handler) openBackend(base sessioncore.BaseClaims, ticket, proto, target
 	h.deps.Arm(base.SessionID)
 	waitDone := make(chan waitResult, 1)
 	go func() {
-		ws, err := h.deps.Wait(base.SessionID, 20*time.Second)
+		ws, err := h.deps.Wait(base.SessionID, sessioncore.AgentDialWait)
 		waitDone <- waitResult{ws, err}
 	}()
 	if err := h.deps.OpenAgentSession(base.AssetID, base.SessionID, ticket, proto,
 		Params{TargetHost: targetHost, TargetPort: targetPort}); err != nil {
+		if h.deps.Cancel != nil {
+			h.deps.Cancel(base.SessionID)
+		}
 		return nil, nil, nil, err
 	}
 	wr := <-waitDone
@@ -173,6 +177,16 @@ func security(proto string) string {
 		return "nla"
 	}
 	return ""
+}
+
+func (h *Handler) keepAlive() time.Duration {
+	if h.deps.KeepAlive == nil {
+		return sessioncore.KeepAlivePing
+	}
+	if d := h.deps.KeepAlive(); d > 0 {
+		return d
+	}
+	return sessioncore.KeepAlivePing
 }
 
 func (h *Handler) auditStart(op string, base sessioncore.BaseClaims, detail map[string]any) {

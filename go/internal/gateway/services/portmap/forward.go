@@ -12,6 +12,7 @@ import (
 	"github.com/gorilla/websocket"
 	auditstore "github.com/ops-bastion/ops/go/internal/gateway/infra/audit"
 	"github.com/ops-bastion/ops/go/internal/protocol/datagram"
+	"github.com/ops-bastion/ops/go/internal/sessioncore"
 	"github.com/ops-bastion/ops/go/internal/sessionws"
 )
 
@@ -56,11 +57,12 @@ func (s *Service) handleTCPConn(ctx context.Context, e *entry, client net.Conn) 
 	s.deps.Arm(sessionID)
 	waitDone := make(chan waitResult, 1)
 	go func() {
-		ws, err := s.deps.Wait(sessionID, 20*time.Second)
+		ws, err := s.deps.Wait(sessionID, sessioncore.AgentDialWait)
 		waitDone <- waitResult{ws, err}
 	}()
 	if err := s.deps.OpenSession(assetID, sessionID, ticket, "tcp",
 		e.runtime.TargetHost, e.runtime.TargetPort); err != nil {
+		s.cancelPending(sessionID)
 		log.Printf("portmap open_session failed: %v", err)
 		s.deps.AuditEnd(auditstore.TypePortmapTCP, sessionID, assetID, false,
 			mergeDetail(detail, map[string]any{"error": err.Error()}))
@@ -140,7 +142,7 @@ func (s *Service) serveUDP(ctx context.Context, e *entry) {
 		err error
 	}, 1)
 	go func() {
-		ws, err := s.deps.Wait(sessionID, 20*time.Second)
+		ws, err := s.deps.Wait(sessionID, sessioncore.AgentDialWait)
 		waitDone <- struct {
 			ws  *websocket.Conn
 			err error
@@ -148,6 +150,7 @@ func (s *Service) serveUDP(ctx context.Context, e *entry) {
 	}()
 	if err := s.deps.OpenSession(assetID, sessionID, ticket, "udp",
 		e.runtime.TargetHost, e.runtime.TargetPort); err != nil {
+		s.cancelPending(sessionID)
 		log.Printf("portmap udp open_session failed: %v", err)
 		s.deps.AuditEnd(auditstore.TypePortmapUDP, sessionID, assetID, false,
 			mergeDetail(detail, map[string]any{"error": err.Error()}))

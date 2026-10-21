@@ -1,6 +1,10 @@
 package app
 
-import "github.com/ops-bastion/ops/go/internal/gateway/sessions/desktop"
+import (
+	"time"
+
+	"github.com/ops-bastion/ops/go/internal/gateway/sessions/desktop"
+)
 
 func init() {
 	registerFeature("session.desktop", func(ctx *buildContext) {
@@ -11,6 +15,8 @@ func init() {
 			Arm:              ctx.server.ArmSession,
 			Wait:             ctx.server.WaitSession,
 			OpenAgentSession: ctx.server.OpenAgentSession,
+			Cancel:           ctx.server.CancelSession,
+			KeepAlive:        func() time.Duration { return ctx.server.PingFor("desktop") },
 			AuditStart:       ctx.server.AuditStart,
 			AuditEnd:         ctx.server.AuditEnd,
 			AttachFinalize:   ctx.server.AttachAuditFinalize,

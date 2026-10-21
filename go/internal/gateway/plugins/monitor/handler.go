@@ -16,8 +16,10 @@ type Poster interface {
 	PostJSON(path string, body any, out any) error
 }
 
-// Handle returns an HTTP handler for the dedicated agent metrics WebSocket.
-func Handle(upgrade func(http.ResponseWriter, *http.Request) (*websocket.Conn, error), post Poster) http.HandlerFunc {
+// Handle returns an HTTP handler for the legacy agent metrics WebSocket.
+// New agents report on the control connection; this remains for old agents.
+// Samples are queued on ingestor and this loop does not wait for ingest.
+func Handle(upgrade func(http.ResponseWriter, *http.Request) (*websocket.Conn, error), post Poster, ingestor *Ingestor) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		assetID := r.Header.Get("X-Asset-Id")
 		token := r.Header.Get("X-Agent-Token")
@@ -53,38 +55,14 @@ func Handle(upgrade func(http.ResponseWriter, *http.Request) (*websocket.Conn, e
 			if err := json.Unmarshal(data, &env); err != nil {
 				continue
 			}
-			switch env.Type {
-			case "points":
-				payload, err := monitorproto.UnmarshalPayload[monitorproto.PointsPayload](env)
-				if err != nil {
-					continue
-				}
-				points := make([]map[string]any, 0, len(payload.Points))
-				for _, p := range payload.Points {
-					points = append(points, map[string]any{
-						"itemId":   p.ItemID,
-						"instance": p.Instance,
-						"value":    p.Value,
-					})
-				}
-				body := map[string]any{
-					"assetId":          assetID,
-					"agentToken":       token,
-					"collectedAt":      payload.CollectedAt,
-					"points":           points,
-					"completeFamilies": payload.CompleteFamilies,
-				}
-				if err := post.PostJSON("/api/internal/metrics/ingest", body, nil); err != nil {
-					log.Printf("metrics ingest failed asset=%s: %v", assetID, err)
-					ack, _ := monitorproto.Marshal("ack", env.RequestID, monitorproto.AckPayload{OK: false, Message: err.Error()})
-					_ = ws.WriteMessage(websocket.TextMessage, ack)
-					continue
-				}
-				ack, _ := monitorproto.Marshal("ack", env.RequestID, monitorproto.AckPayload{OK: true})
-				_ = ws.WriteMessage(websocket.TextMessage, ack)
-			default:
-				// ignore unknown
+			if env.Type != "points" {
+				continue
 			}
+			payload, err := monitorproto.UnmarshalPayload[monitorproto.PointsPayload](env)
+			if err != nil {
+				continue
+			}
+			ingestor.Enqueue(assetID, token, payload)
 		}
 	}
 }

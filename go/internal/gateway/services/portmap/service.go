@@ -25,6 +25,8 @@ type Deps struct {
 	Arm              func(string)
 	Wait             func(string, time.Duration) (*websocket.Conn, error)
 	OpenSession      func(string, string, string, string, string, int) error
+	Cancel           func(string)
+	KeepAlive        func() time.Duration
 	ServeBridge      sessioncore.BridgeServeFunc
 	VerifyTicket     func(string) (sessioncore.BaseClaims, json.RawMessage, error)
 	UpgradeWS        func(http.ResponseWriter, *http.Request) (*websocket.Conn, error)
@@ -40,6 +42,22 @@ type Service struct {
 	ephemeralMu     sync.Mutex
 	ephemeral       map[string]*ephemeralEntry
 	reverseSessions map[string]*ephemeralSession
+}
+
+func (s *Service) keepAlive() time.Duration {
+	if s.deps.KeepAlive == nil {
+		return sessioncore.KeepAlivePing
+	}
+	if d := s.deps.KeepAlive(); d > 0 {
+		return d
+	}
+	return sessioncore.KeepAlivePing
+}
+
+func (s *Service) cancelPending(sessionID string) {
+	if s.deps.Cancel != nil {
+		s.deps.Cancel(sessionID)
+	}
 }
 
 func NewService(deps Deps) *Service {

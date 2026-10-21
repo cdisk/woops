@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	gatewayapp "github.com/ops-bastion/ops/go/internal/gateway/app"
+	"github.com/ops-bastion/ops/go/internal/wsutil"
 )
 
 func envOr(key, fallback string) string {
@@ -45,6 +46,7 @@ func main() {
 		TLSSpkiSHA256:       strings.TrimSpace(*tlsPin),
 		AuditDir:            strings.TrimSpace(*auditDir),
 		AuditInstanceID:     strings.TrimSpace(*auditInstance),
+		Ping:                wsutil.FromEnv(os.Getenv),
 	})
 	// Force-kill cannot CloseAudit; seal leftover RUNNING rows on every start.
 	srv.InterruptOrphanOperations()

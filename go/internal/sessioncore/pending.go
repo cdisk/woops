@@ -8,8 +8,13 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+type pendingResult struct {
+	ws  *websocket.Conn
+	err error
+}
+
 type pendingEntry struct {
-	ch        chan *websocket.Conn
+	ch        chan pendingResult
 	createdAt time.Time
 }
 
@@ -30,14 +35,14 @@ func (p *PendingSessions) Arm(sessionID string) {
 	if _, ok := p.wait[sessionID]; ok {
 		return
 	}
-	p.wait[sessionID] = &pendingEntry{ch: make(chan *websocket.Conn, 1), createdAt: time.Now()}
+	p.wait[sessionID] = &pendingEntry{ch: make(chan pendingResult, 1), createdAt: time.Now()}
 }
 
 func (p *PendingSessions) Wait(sessionID string, timeout time.Duration) (*websocket.Conn, error) {
 	p.mu.Lock()
 	entry, ok := p.wait[sessionID]
 	if !ok {
-		entry = &pendingEntry{ch: make(chan *websocket.Conn, 1), createdAt: time.Now()}
+		entry = &pendingEntry{ch: make(chan pendingResult, 1), createdAt: time.Now()}
 		p.wait[sessionID] = entry
 	}
 	p.mu.Unlock()
@@ -48,14 +53,26 @@ func (p *PendingSessions) Wait(sessionID string, timeout time.Duration) (*websoc
 	}()
 
 	select {
-	case ws := <-entry.ch:
-		return ws, nil
+	case res := <-entry.ch:
+		if res.err != nil {
+			return nil, res.err
+		}
+		return res.ws, nil
 	case <-time.After(timeout):
 		return nil, fmt.Errorf("timeout waiting agent session %s", sessionID)
 	}
 }
 
+// Cancel unblocks Wait immediately. Used when open_session cannot be sent.
+func (p *PendingSessions) Cancel(sessionID string) bool {
+	return p.finish(sessionID, pendingResult{err: fmt.Errorf("agent session cancelled")})
+}
+
 func (p *PendingSessions) Deliver(sessionID string, ws *websocket.Conn) bool {
+	return p.finish(sessionID, pendingResult{ws: ws})
+}
+
+func (p *PendingSessions) finish(sessionID string, res pendingResult) bool {
 	p.mu.Lock()
 	entry, ok := p.wait[sessionID]
 	p.mu.Unlock()
@@ -63,7 +80,7 @@ func (p *PendingSessions) Deliver(sessionID string, ws *websocket.Conn) bool {
 		return false
 	}
 	select {
-	case entry.ch <- ws:
+	case entry.ch <- res:
 		return true
 	default:
 		return false

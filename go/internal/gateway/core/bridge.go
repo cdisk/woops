@@ -5,7 +5,6 @@ import (
 	"log"
 	"net/http"
 	"sync/atomic"
-	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/ops-bastion/ops/go/internal/protocol/control"
@@ -54,10 +53,11 @@ func (s *Server) ServeBridge(spec sessioncore.BridgeSpec, w http.ResponseWriter,
 	s.pending.Arm(base.SessionID)
 	waitDone := make(chan waitResult, 1)
 	go func() {
-		ws, err := s.pending.Wait(base.SessionID, 20*time.Second)
+		ws, err := s.pending.Wait(base.SessionID, sessioncore.AgentDialWait)
 		waitDone <- waitResult{ws, err}
 	}()
 	if err := s.openAgentSession(base.AssetID, base.SessionID, ticket, protocol, prepared.Params); err != nil {
+		s.pending.Cancel(base.SessionID)
 		_ = browserWS.WriteMessage(websocket.TextMessage, []byte("ERROR: "+err.Error()))
 		s.auditEnd(spec.OperationType, fields, false, "",
 			mergeDetail(prepared.StartDetail, map[string]any{"error": err.Error()}))
@@ -80,8 +80,9 @@ func (s *Server) ServeBridge(spec sessioncore.BridgeSpec, w http.ResponseWriter,
 
 	keepDone := make(chan struct{})
 	defer close(keepDone)
-	sessioncore.StartKeepAlive(browserWS, keepDone)
-	sessioncore.StartKeepAlive(agentWS, keepDone)
+	pingEvery := s.PingFor(protocol)
+	sessioncore.StartKeepAliveEvery(browserWS, keepDone, pingEvery)
+	sessioncore.StartKeepAliveEvery(agentWS, keepDone, pingEvery)
 	var bytesIn, bytesOut int64
 	errCh := make(chan error, 2)
 	go func() {
